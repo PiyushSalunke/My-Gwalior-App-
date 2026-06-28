@@ -1,0 +1,12 @@
+{
+  "name": "My Gwalior City App",
+  "description": "The official civic issue reporting, tracking, and citizen engagement portal for Gwalior, Madhya Pradesh, India.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
