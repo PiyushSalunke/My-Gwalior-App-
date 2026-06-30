@@ -97,6 +97,24 @@ export interface Badge {
   color: string;
 }
 
+export interface AttendanceLog {
+  timestamp: string;
+  type: 'app_open' | 'manual_checkin' | 'manual_checkout';
+  location?: string;
+  device?: string;
+  pageOpened?: string;
+  durationMinutes?: number;
+  latitude?: number;
+  longitude?: number;
+  sessionId?: string;
+  pagesVisited?: string[];
+  updatesPerformed?: string[];
+  status?: 'active' | 'completed';
+  checkInTime?: string;
+  checkOutTime?: string;
+  patrolSummary?: string;
+}
+
 export interface UserProfile {
   uid: string;
   name: string;
@@ -111,6 +129,12 @@ export interface UserProfile {
   verificationStatus?: 'verified' | 'pending' | 'rejected' | 'none';
   accessLevel?: 'level_1' | 'level_2' | 'level_3' | 'none';
   password?: string;
+  phone?: string;
+  phoneVerified?: boolean;
+  emailVerified?: boolean;
+  attendanceLogs?: AttendanceLog[];
+  department?: 'water' | 'light' | 'garbage' | 'road' | 'health' | 'admin' | string;
+  authorityLevel?: 'commissioner' | 'chief_engineer' | 'superintendent' | 'inspector' | 'field_officer' | string;
 }
 
 export interface WardStats {

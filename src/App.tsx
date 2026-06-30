@@ -37,6 +37,7 @@ import {
   Calendar,
   Building,
   Camera,
+  Upload,
   Video,
   RefreshCw,
   LogOut,
@@ -57,7 +58,9 @@ import {
   Check,
   LayoutGrid,
   Grid,
-  List
+  List,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -78,7 +81,8 @@ import {
   PolarGrid,
   PolarAngleAxis,
   PolarRadiusAxis,
-  Radar
+  Radar,
+  CartesianGrid
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { APIProvider, Map as GoogleMap, AdvancedMarker, Pin, InfoWindow } from '@vis.gl/react-google-maps';
@@ -112,12 +116,62 @@ const STATUS_CONFIG: Record<IssueStatus, { label: string; bg: string; text: stri
   resolved: { label: 'Resolved', bg: 'bg-emerald-100', text: 'text-emerald-800', step: 5 }
 };
 
+export const DEPARTMENTS: Record<string, { label: string; hindiLabel: string; icon: string; color: string; bg: string; border: string }> = {
+  water: { label: 'Water Department', hindiLabel: 'जल विभाग', icon: '💧', color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
+  light: { label: 'Electricity & Light', hindiLabel: 'विद्युत विभाग', icon: '💡', color: 'text-yellow-600', bg: 'bg-yellow-50', border: 'border-yellow-200' },
+  garbage: { label: 'Sanitation & Garbage', hindiLabel: 'स्वच्छता विभाग', icon: '🧹', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  road: { label: 'Public Works (PWD)', hindiLabel: 'सड़क विभाग', icon: '🛣️', color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200' },
+  health: { label: 'Public Health', hindiLabel: 'स्वास्थ्य विभाग', icon: '🏥', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
+  admin: { label: 'Municipal Administration', hindiLabel: 'नगर निगम प्रशासन', icon: '🏛️', color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-200' }
+};
+
+export const AUTHORITY_LEVELS: Record<string, { label: string; hindiLabel: string; rank: number; badge: string }> = {
+  commissioner: { label: 'Commissioner', hindiLabel: 'आयुक्त', rank: 5, badge: '👑' },
+  chief_engineer: { label: 'Chief Engineer', hindiLabel: 'मुख्य अभियंता', rank: 4, badge: '👷' },
+  superintendent: { label: 'Superintendent', hindiLabel: 'अधीक्षक', rank: 3, badge: '📋' },
+  inspector: { label: 'Inspector', hindiLabel: 'निरीक्षक', rank: 2, badge: '🔍' },
+  field_officer: { label: 'Field Officer', hindiLabel: 'क्षेत्रीय अधिकारी', rank: 1, badge: '🏃' }
+};
+
 // Map center bound mappings for Gwalior, Madhya Pradesh, India
 const MAP_BOUNDS = {
   latMin: 26.1900,
   latMax: 26.2500,
   lngMin: 78.1400,
   lngMax: 78.2400
+};
+
+const getCoordinatesForZone = (zoneName: string) => {
+  const normalized = zoneName.toLowerCase();
+  if (normalized.includes('lashkar') || normalized.includes('bada')) {
+    return { latitude: 26.2183, longitude: 78.1828 };
+  } else if (normalized.includes('morar') || normalized.includes('thatipur')) {
+    return { latitude: 26.2150, longitude: 78.2120 };
+  } else if (normalized.includes('city center')) {
+    return { latitude: 26.1960, longitude: 78.1960 };
+  } else if (normalized.includes('fort') || normalized.includes('old town')) {
+    return { latitude: 26.2280, longitude: 78.1710 };
+  } else if (normalized.includes('dd nagar') || normalized.includes('pinto')) {
+    return { latitude: 26.2420, longitude: 78.2190 };
+  } else if (normalized.includes('hq') || normalized.includes('nigam')) {
+    return { latitude: 26.2215, longitude: 78.1685 };
+  }
+  return { latitude: 26.2200, longitude: 78.1800 };
+};
+
+const getPageNameForTab = (tab: string) => {
+  switch (tab) {
+    case 'feed': return 'Feed & Issues Board';
+    case 'map': return 'Interactive Civic Map';
+    case 'leaderboard': return 'Citizen Leaderboard';
+    case 'admin_panel': return 'Admin Control Center';
+    case 'emergency': return 'Emergency Helpline Desk';
+    case 'citizen_services': return 'Nagar Nigam Services';
+    case 'department_chat': return 'Inter-Department Chat';
+    case 'budget_tracker': return 'Smart Budget Tracker';
+    case 'e_passes': return 'Nagar Nigam E-Passes';
+    default: return 'Gwalior Portal Dashboard';
+  }
 };
 
 // Preset high-quality mock report images to let users test instantly
@@ -171,6 +225,21 @@ export default function App() {
   const [loginAvatar, setLoginAvatar] = useState('https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80');
   const [loginPasswordInput, setLoginPasswordInput] = useState('');
   const [registerPasswordInput, setRegisterPasswordInput] = useState('');
+  const [registerPhoneInput, setRegisterPhoneInput] = useState('');
+  const [registerDepartment, setRegisterDepartment] = useState<string>('water');
+  const [registerAuthorityLevel, setRegisterAuthorityLevel] = useState<string>('inspector');
+  const [phoneVerificationPendingUser, setPhoneVerificationPendingUser] = useState<UserProfile | null>(null);
+  const [otpSentCode, setOtpSentCode] = useState<string>('');
+  const [otpInput, setOtpInput] = useState<string>('');
+  const [isOtpSending, setIsOtpSending] = useState<boolean>(false);
+  const [otpSentPhone, setOtpSentPhone] = useState<string>('');
+  const [otpCountdown, setOtpCountdown] = useState<number>(0);
+  const [emailOtpSentCode, setEmailOtpSentCode] = useState<string>('');
+  const [emailOtpInput, setEmailOtpInput] = useState<string>('');
+  const [isEmailOtpSending, setIsEmailOtpSending] = useState<boolean>(false);
+  const [emailOtpSentAddress, setEmailOtpSentAddress] = useState<string>('');
+  const [emailOtpCountdown, setEmailOtpCountdown] = useState<number>(0);
+  const [verificationStep, setVerificationStep] = useState<number>(1); // 1 = Phone Verification, 2 = Email Verification
   const [loginTab, setLoginTab] = useState<'credentials' | 'demo' | 'register'>('credentials');
   const [authorityAccessLevel, setAuthorityAccessLevel] = useState<'level_1' | 'level_2' | 'level_3'>('level_1');
   const [searchQuery, setSearchQuery] = useState('');
@@ -180,6 +249,11 @@ export default function App() {
   const [mobileCols, setMobileCols] = useState<1 | 2>(1);
   const [desktopCols, setDesktopCols] = useState<2 | 3>(2);
   const [mobileChartTab, setMobileChartTab] = useState<'trends' | 'sla' | 'severity'>('trends');
+  
+  // Community Verification Form States
+  const [verifyRole, setVerifyRole] = useState<'sight' | 'resident' | 'commuter'>('sight');
+  const [verifyGpsCheck, setVerifyGpsCheck] = useState<boolean>(true);
+  const [verifyCustomNote, setVerifyCustomNote] = useState<string>('');
   
   // Dashboard & Leaderboard States
   const [stats, setStats] = useState<any>(null);
@@ -210,7 +284,53 @@ export default function App() {
   }, [issues]);
   
   // Interactive Profile States
-  const [profileSubTab, setProfileSubTab] = useState<string>('achievements');
+  const [profileSubTab, setProfileSubTab] = useState<string>('leaderboard');
+  const [adminSubTab, setAdminSubTab] = useState<'roster' | 'attendance_reports'>('roster');
+  const [impactWardFilter, setImpactWardFilter] = useState<string>('all');
+  const [impactCategoryFilter, setImpactCategoryFilter] = useState<string>('all');
+  const [impactSeverityFilter, setImpactSeverityFilter] = useState<string>('all');
+  const [impactDashboardMobileCols, setImpactDashboardMobileCols] = useState<1 | 2>(2);
+  const [leaderboardMobileCols, setLeaderboardMobileCols] = useState<1 | 2>(1);
+  const [leaderboardViewMode, setLeaderboardViewMode] = useState<'table' | 'cards'>('cards');
+  const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
+  const [generatedReport, setGeneratedReport] = useState<any | null>(null);
+  const [adminSearchQuery, setAdminSearchQuery] = useState('');
+  const [adminMobileColumns, setAdminMobileColumns] = useState<1 | 2>(1);
+  const [expandedUserUids, setExpandedUserUids] = useState<Record<string, boolean>>({});
+  const [attendanceReports, setAttendanceReports] = useState<any[]>([]);
+  const [selectedReportUser, setSelectedReportUser] = useState<any | null>(null);
+  const [isFetchingReports, setIsFetchingReports] = useState<boolean>(false);
+
+  // Android Simulator States (Desktop Only)
+  const [simBezelColor, setSimBezelColor] = useState<'slate' | 'indigo' | 'emerald' | 'gold' | 'black'>('black');
+  const [simBattery, setSimBattery] = useState<number>(88);
+  const [simNetwork, setSimNetwork] = useState<'5g' | 'wifi' | 'offline'>('5g');
+  const [simTime, setSimTime] = useState<string>('10:42 AM');
+  const [simVolume, setSimVolume] = useState<number>(75);
+  const [showVolumeHud, setShowVolumeHud] = useState<boolean>(false);
+  const [simIsLocked, setSimIsLocked] = useState<boolean>(false);
+  const [simNotification, setSimNotification] = useState<string | null>(
+    "Gwalior Admin: PWA configured successfully with service workers and offline support. Tap 'Install App' on the left panel."
+  );
+  const [showSimNotification, setShowSimNotification] = useState<boolean>(true);
+  const [simLocationName, setSimLocationName] = useState<string>('Maharaj Bada');
+
+  // Synchronize mock device clock
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      let hours = now.getHours();
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      setSimTime(`${hours}:${minutes} ${ampm}`);
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
   const [redeemedRewards, setRedeemedRewards] = useState<any[]>(() => {
     try {
       const saved = localStorage.getItem('civicpulse_redeemed_rewards');
@@ -219,13 +339,33 @@ export default function App() {
       return [];
     }
   });
+  const [isProfileEditModalOpen, setIsProfileEditModalOpen] = useState<boolean>(false);
   const [profileEditName, setProfileEditName] = useState<string>('');
+  const [profileEditEmail, setProfileEditEmail] = useState<string>('');
   const [profileEditPhone, setProfileEditPhone] = useState<string>('+91 94251 12345');
+  const [profileEditAvatar, setProfileEditAvatar] = useState<string>('');
   const [profileEditWard, setProfileEditWard] = useState<string>('Lashkar Zone (Maharaj Bada)');
+  const [profileEditDepartment, setProfileEditDepartment] = useState<string>('water');
+  const [profileEditAuthorityLevel, setProfileEditAuthorityLevel] = useState<string>('inspector');
+  const [attendanceLocation, setAttendanceLocation] = useState<string>('Lashkar Zone (Maharaj Bada)');
+  const [isSubmittingAttendance, setIsSubmittingAttendance] = useState<boolean>(false);
   const [profileNotificationSMS, setProfileNotificationSMS] = useState<boolean>(true);
   const [profileNotificationWhatsApp, setProfileNotificationWhatsApp] = useState<boolean>(true);
   const [profileNotificationEmail, setProfileNotificationEmail] = useState<boolean>(true);
   const [profileSuccessMsg, setProfileSuccessMsg] = useState<string | null>(null);
+
+  const [checkedInToday, setCheckedInToday] = useState<boolean>(() => {
+    try {
+      const savedUser = localStorage.getItem('civicpulse_current_user');
+      const userObj = savedUser ? JSON.parse(savedUser) : null;
+      const uid = userObj?.uid || 'temp';
+      const lastCheckIn = localStorage.getItem(`civicpulse_last_checkin_${uid}`);
+      if (!lastCheckIn) return false;
+      return lastCheckIn === new Date().toDateString();
+    } catch {
+      return false;
+    }
+  });
   
   // Toast Notifications State & Polling Refs
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
@@ -263,9 +403,81 @@ export default function App() {
   const [reportDesc, setReportDesc] = useState('');
   const [reportLat, setReportLat] = useState(26.2183);
   const [reportLng, setReportLng] = useState(78.1828);
-  const [mapMode, setMapMode] = useState<'svg' | 'google'>('svg');
-  const [reportMapMode, setReportMapMode] = useState<'svg' | 'google'>('svg');
+  const [mapMode, setMapMode] = useState<'svg' | 'google'>('google');
+  const [reportMapMode, setReportMapMode] = useState<'svg' | 'google'>('google');
   const [geolocationStatus, setGeolocationStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; message: string }>({ type: 'idle', message: '' });
+
+  // Check if we are running embedded inside the device simulator iframe
+  const isEmbedded = useMemo(() => {
+    return typeof window !== 'undefined' && (
+      window.location.search.includes('embed=true') || 
+      window.top !== window.self
+    );
+  }, []);
+
+  // Sync simulator states inside the iframe if we are the embedded child
+  useEffect(() => {
+    if (!isEmbedded) return;
+    
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'SIM_STATE_UPDATE') {
+        if (e.data.network !== undefined) setSimNetwork(e.data.network);
+        if (e.data.battery !== undefined) setSimBattery(e.data.battery);
+        if (e.data.time !== undefined) setSimTime(e.data.time);
+        if (e.data.lat !== undefined) setReportLat(e.data.lat);
+        if (e.data.lng !== undefined) setReportLng(e.data.lng);
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    
+    // Request initial state from parent
+    if (window.parent) {
+      window.parent.postMessage({ type: 'SIM_IFRAME_READY' }, '*');
+    }
+    
+    return () => window.removeEventListener('message', handleMessage);
+  }, [isEmbedded]);
+
+  // Synchronize simulator state changes from parent to iframe child
+  useEffect(() => {
+    if (isEmbedded) return;
+    
+    const iframe = document.getElementById('simulator-iframe') as HTMLIFrameElement | null;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({
+        type: 'SIM_STATE_UPDATE',
+        network: simNetwork,
+        battery: simBattery,
+        time: simTime,
+        lat: reportLat,
+        lng: reportLng
+      }, '*');
+    }
+  }, [isEmbedded, simNetwork, simBattery, simTime, reportLat, reportLng]);
+
+  // Listen for SIM_IFRAME_READY to immediately synchronize status to iframe
+  useEffect(() => {
+    if (isEmbedded) return;
+    
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'SIM_IFRAME_READY') {
+        const iframe = document.getElementById('simulator-iframe') as HTMLIFrameElement | null;
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage({
+            type: 'SIM_STATE_UPDATE',
+            network: simNetwork,
+            battery: simBattery,
+            time: simTime,
+            lat: reportLat,
+            lng: reportLng
+          }, '*');
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [isEmbedded, simNetwork, simBattery, simTime, reportLat, reportLng]);
 
   const handleGeoLocation = () => {
     if (!navigator.geolocation) {
@@ -332,6 +544,7 @@ export default function App() {
 
   // Live 4K Camera States
   const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
+  const [isCameraSimulated, setIsCameraSimulated] = useState(false);
   const [liveCameraMode, setLiveCameraMode] = useState<'photo' | 'video'>('photo');
   const [isRecordingLiveVideo, setIsRecordingLiveVideo] = useState(false);
   const [liveVideoSeconds, setLiveVideoSeconds] = useState(0);
@@ -364,6 +577,11 @@ export default function App() {
 
   // Gwalior Landmarks & Focus State
   const [focusedLandmarkId, setFocusedLandmarkId] = useState<string | null>(null);
+  const [landmarkSearch, setLandmarkSearch] = useState('');
+  const [mapCategoryFilter, setMapCategoryFilter] = useState('all');
+  const [mapSeverityFilter, setMapSeverityFilter] = useState('all');
+  const [mapStatusFilter, setMapStatusFilter] = useState('all');
+  const [mapSearchQuery, setMapSearchQuery] = useState('');
 
   // Lightbox view state
   const [lightboxMedia, setLightboxMedia] = useState<{ url: string; title: string; isVideo: boolean; issue?: CivicIssue } | null>(null);
@@ -389,8 +607,92 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       setProfileEditName(currentUser.name);
+      setProfileEditEmail(currentUser.email || '');
+      setProfileEditPhone(currentUser.phone || '');
+      setProfileEditAvatar(currentUser.avatar || '');
+      setProfileEditDepartment(currentUser.department || 'water');
+      setProfileEditAuthorityLevel(currentUser.authorityLevel || 'inspector');
     }
-  }, [currentUser]);
+  }, [currentUser?.uid]);
+
+  // Page View and Session Duration tracking for Gwalior Officials
+  useEffect(() => {
+    if (currentUser && (currentUser.role === 'authority' || currentUser.role === 'admin')) {
+      let appOpenedAt = sessionStorage.getItem('appOpenedAt');
+      if (!appOpenedAt) {
+        appOpenedAt = Date.now().toString();
+        sessionStorage.setItem('appOpenedAt', appOpenedAt);
+      }
+      
+      let sessionId = sessionStorage.getItem('gmcSessionId');
+      if (!sessionId) {
+        sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        sessionStorage.setItem('gmcSessionId', sessionId);
+      }
+      
+      const elapsedMinutes = Math.max(1, Math.round((Date.now() - parseInt(appOpenedAt)) / 60000));
+      
+      const logPageView = async (detectedLat?: number, detectedLng?: number) => {
+        try {
+          const lat = detectedLat || 26.2183;
+          const lng = detectedLng || 78.1828;
+          const defaultLoc = activeTab === 'admin_panel' ? 'Admin Portal Desk' : 'Gwalior Civic HQ';
+          
+          const res = await fetch(`/api/users/${currentUser.uid}/attendance`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'app_open',
+              location: defaultLoc,
+              latitude: lat,
+              longitude: lng,
+              pageOpened: getPageNameForTab(activeTab),
+              durationMinutes: elapsedMinutes,
+              sessionId
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.user && data.user.attendanceLogs) {
+              setCurrentUser(prev => prev && prev.uid === data.user.uid ? { ...prev, attendanceLogs: data.user.attendanceLogs } : prev);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to log navigation page view:', err);
+        }
+      };
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => logPageView(position.coords.latitude, position.coords.longitude),
+          () => logPageView(),
+          { timeout: 3000 }
+        );
+      } else {
+        logPageView();
+      }
+    }
+  }, [activeTab, currentUser?.uid]);
+
+  useEffect(() => {
+    if (otpCountdown > 0) {
+      const timer = setTimeout(() => setOtpCountdown(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [otpCountdown]);
+
+  useEffect(() => {
+    if (emailOtpCountdown > 0) {
+      const timer = setTimeout(() => setEmailOtpCountdown(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [emailOtpCountdown]);
+  
+  useEffect(() => {
+    if (activeTab === 'admin_panel') {
+      fetchAttendanceReports();
+    }
+  }, [activeTab]);
 
   // Keyboard shortcuts listener for Lightbox/Modal viewer
   useEffect(() => {
@@ -417,6 +719,13 @@ export default function App() {
   const fetchIssues = async () => {
     try {
       const res = await fetch('/api/issues');
+      if (!res.ok) {
+        throw new Error(`Server status: ${res.status}`);
+      }
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Response is not JSON');
+      }
       const data: CivicIssue[] = await res.json();
       
       const prevIssues = issuesRef.current;
@@ -460,6 +769,13 @@ export default function App() {
   const fetchUser = async (uid: string) => {
     try {
       const res = await fetch(`/api/users/${uid}`);
+      if (!res.ok) {
+        throw new Error(`Server status: ${res.status}`);
+      }
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Response is not JSON');
+      }
       const data = await res.json();
       setCurrentUser(data);
       if (data.role === 'admin') {
@@ -480,6 +796,13 @@ export default function App() {
   const fetchStats = async () => {
     try {
       const res = await fetch('/api/stats');
+      if (!res.ok) {
+        throw new Error(`Server status: ${res.status}`);
+      }
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Response is not JSON');
+      }
       const data = await res.json();
       setStats(data);
     } catch (err) {
@@ -490,10 +813,35 @@ export default function App() {
   const fetchLeaderboard = async () => {
     try {
       const res = await fetch('/api/leaderboard');
+      if (!res.ok) {
+        throw new Error(`Server status: ${res.status}`);
+      }
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Response is not JSON');
+      }
       const data = await res.json();
       setLeaderboard(data);
     } catch (err) {
       console.error('Error fetching leaderboard:', err);
+    }
+  };
+
+  const fetchAttendanceReports = async () => {
+    setIsFetchingReports(true);
+    try {
+      const res = await fetch('/api/authorities/attendance-report');
+      if (res.ok) {
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json();
+          setAttendanceReports(data);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch Gwalior authority attendance reports:', err);
+    } finally {
+      setIsFetchingReports(false);
     }
   };
 
@@ -540,13 +888,73 @@ export default function App() {
     }
   };
 
+  const handleDailyCheckIn = async () => {
+    if (!currentUser || checkedInToday) return;
+    const today = new Date().toDateString();
+    
+    // Update local storage first to prevent spamming
+    localStorage.setItem(`civicpulse_last_checkin_${currentUser.uid}`, today);
+    setCheckedInToday(true);
+    
+    // Update points in backend (+10 pts)
+    const updatedUser = {
+      ...currentUser,
+      points: currentUser.points + 10
+    };
+    
+    try {
+      const res = await fetch('/api/users/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUser)
+      });
+      const data = await res.json();
+      setCurrentUser(data);
+      fetchLeaderboard();
+      
+      // Update local storage copy of the user to keep sync
+      localStorage.setItem('civicpulse_current_user', JSON.stringify(data));
+
+      addToast({
+        issueId: 'daily_checkin',
+        issueTitle: 'Daily Check-in Completed!',
+        newStatus: 'resolved',
+        type: 'general',
+        message: 'Congratulations! You received +10 Stewardship points for checking in today to keep Gwalior clean.'
+      });
+    } catch (err) {
+      console.error('Error during daily checkin:', err);
+    }
+  };
+
   const handleSaveProfileSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
+
+    if (!profileEditName.trim()) {
+      alert("Name cannot be empty.");
+      return;
+    }
+
+    if (!profileEditEmail.trim() || !profileEditEmail.includes('@')) {
+      alert("Please enter a valid email address containing '@'.");
+      return;
+    }
+    
+    if (!profileEditPhone.trim()) {
+      alert("Mobile number is required.");
+      return;
+    }
     
     const updatedProfile = {
       ...currentUser,
-      name: profileEditName || currentUser.name
+      name: profileEditName.trim(),
+      email: profileEditEmail.trim(),
+      phone: profileEditPhone.trim(),
+      avatar: profileEditAvatar || currentUser.avatar,
+      phoneVerified: true, // Set verified when editing or after OTP
+      department: (currentUser.role === 'authority' || currentUser.role === 'admin') ? profileEditDepartment : currentUser.department,
+      authorityLevel: (currentUser.role === 'authority' || currentUser.role === 'admin') ? profileEditAuthorityLevel : currentUser.authorityLevel
     };
     
     try {
@@ -574,19 +982,146 @@ export default function App() {
     );
   }, [issues, currentUser]);
 
-  const handleLogin = (user: UserProfile) => {
-    setCurrentUser(user);
-    if (user.role === 'admin') {
-      setUserRole('admin');
-      setShowAdminPanel(true);
-    } else if (user.role === 'authority' && user.verificationStatus === 'verified') {
-      setUserRole('authority');
-      setShowAdminPanel(true);
-    } else {
-      setUserRole('citizen');
-      setShowAdminPanel(false);
+  const checkedInAttendanceToday = useMemo(() => {
+    if (!currentUser || !currentUser.attendanceLogs) return false;
+    const todayStr = new Date().toISOString().split('T')[0];
+    return currentUser.attendanceLogs.some(
+      log => log.type === 'manual_checkin' && log.timestamp.split('T')[0] === todayStr
+    );
+  }, [currentUser]);
+
+  const activePatrolSession = useMemo(() => {
+    if (!currentUser || !currentUser.attendanceLogs) return null;
+    return [...currentUser.attendanceLogs]
+      .reverse()
+      .find(log => log.type === 'manual_checkin' && log.status === 'active');
+  }, [currentUser]);
+
+  const [patrolSummaryText, setPatrolSummaryText] = useState('');
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+
+  const handleCheckout = async () => {
+    if (!currentUser) return;
+    setIsCheckingOut(true);
+    try {
+      const res = await fetch(`/api/users/${currentUser.uid}/attendance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'manual_checkout',
+          patrolSummary: patrolSummaryText || 'Completed standard Gwalior municipal patrol round.'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user && data.user.attendanceLogs) {
+          setCurrentUser(prev => prev && prev.uid === data.user.uid ? { ...prev, attendanceLogs: data.user.attendanceLogs } : prev);
+        }
+        setPatrolSummaryText('');
+        addToast({
+          issueId: 'attendance_logout',
+          issueTitle: 'Patrol Shift Completed',
+          newStatus: 'info',
+          type: 'general',
+          message: `Successfully checked out and recorded patrol summary.`
+        });
+        fetchAttendanceReports();
+      } else {
+        alert('Failed to register check-out on Gwalior Municipal servers.');
+      }
+    } catch (err) {
+      console.error('Error submitting checkout:', err);
+      alert('Network error registering check-out.');
+    } finally {
+      setIsCheckingOut(false);
     }
-    setActiveTab('feed');
+  };
+
+  const submitAttendance = async () => {
+    if (!currentUser) return;
+    setIsSubmittingAttendance(true);
+
+    const zoneCoords = getCoordinatesForZone(attendanceLocation);
+    const appOpenedAt = sessionStorage.getItem('appOpenedAt');
+    const elapsedMinutes = appOpenedAt 
+      ? Math.max(1, Math.round((Date.now() - parseInt(appOpenedAt)) / 60000))
+      : 8;
+
+    const performSubmission = async (detectedLat?: number, detectedLng?: number) => {
+      try {
+        const finalLat = detectedLat || zoneCoords.latitude;
+        const finalLng = detectedLng || zoneCoords.longitude;
+
+        const res = await fetch(`/api/users/${currentUser.uid}/attendance`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'manual_checkin',
+            location: attendanceLocation,
+            latitude: finalLat,
+            longitude: finalLng,
+            pageOpened: getPageNameForTab(activeTab),
+            durationMinutes: elapsedMinutes,
+            device: 'GMC Patrol App'
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user && data.user.attendanceLogs) {
+            setCurrentUser(prev => prev && prev.uid === data.user.uid ? { ...prev, attendanceLogs: data.user.attendanceLogs } : prev);
+          }
+          addToast({
+            issueId: 'attendance_log',
+            issueTitle: 'Attendance Registered',
+            newStatus: 'success',
+            type: 'general',
+            message: `Successfully marked patrol check-in at ${attendanceLocation} (${finalLat.toFixed(4)}°N, ${finalLng.toFixed(4)}°E) for ${elapsedMinutes} mins.`
+          });
+        } else {
+          alert('Failed to register attendance on Gwalior Municipal servers.');
+        }
+      } catch (err) {
+        console.error('Error submitting manual attendance:', err);
+        alert('Network error registering attendance.');
+      } finally {
+        setIsSubmittingAttendance(false);
+      }
+    };
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          performSubmission(position.coords.latitude, position.coords.longitude);
+        },
+        () => {
+          performSubmission();
+        },
+        { timeout: 3000 }
+      );
+    } else {
+      performSubmission();
+    }
+  };
+
+  const handleLogin = (user: UserProfile) => {
+    if (user.phone && user.phoneVerified && user.emailVerified) {
+      setCurrentUser(user);
+      if (user.role === 'admin') {
+        setUserRole('admin');
+        setShowAdminPanel(true);
+      } else if (user.role === 'authority' && user.verificationStatus === 'verified') {
+        setUserRole('authority');
+        setShowAdminPanel(true);
+      } else {
+        setUserRole('citizen');
+        setShowAdminPanel(false);
+      }
+      setActiveTab('feed');
+    } else {
+      setPhoneVerificationPendingUser(user);
+      setVerificationStep(!(user.phone && user.phoneVerified) ? 1 : 2);
+    }
   };
 
   const handleCredentialsLogin = async (e: React.FormEvent) => {
@@ -613,23 +1148,28 @@ export default function App() {
       }
 
       const data = await res.json();
-      setCurrentUser(data);
-      if (data.role === 'admin') {
-        setUserRole('admin');
-        setShowAdminPanel(true);
-      } else if (data.role === 'authority' && data.verificationStatus === 'verified') {
-        setUserRole('authority');
-        setShowAdminPanel(true);
+      if (data.phone && data.phoneVerified && data.emailVerified) {
+        setCurrentUser(data);
+        if (data.role === 'admin') {
+          setUserRole('admin');
+          setShowAdminPanel(true);
+        } else if (data.role === 'authority' && data.verificationStatus === 'verified') {
+          setUserRole('authority');
+          setShowAdminPanel(true);
+        } else {
+          setUserRole('citizen');
+          setShowAdminPanel(false);
+        }
+        
+        // Clear forms
+        setLoginEmail('');
+        setLoginPasswordInput('');
+        
+        setActiveTab('feed');
       } else {
-        setUserRole('citizen');
-        setShowAdminPanel(false);
+        setPhoneVerificationPendingUser(data);
+        setVerificationStep(!(data.phone && data.phoneVerified) ? 1 : 2);
       }
-      
-      // Clear forms
-      setLoginEmail('');
-      setLoginPasswordInput('');
-      
-      setActiveTab('feed');
     } catch (err) {
       console.error('Error with credentials login:', err);
       alert('Network error during login.');
@@ -640,6 +1180,11 @@ export default function App() {
     e.preventDefault();
     if (!loginName.trim() || !loginEmail.trim() || !registerPasswordInput.trim()) {
       alert('Please fill out all fields, including password.');
+      return;
+    }
+
+    if (!registerPhoneInput.trim()) {
+      alert('Please enter your mobile number for mandatory verification.');
       return;
     }
 
@@ -657,7 +1202,12 @@ export default function App() {
       badges: [],
       reportedCount: 0,
       verifiedCount: 0,
-      resolvedCount: 0
+      resolvedCount: 0,
+      phone: registerPhoneInput.trim(),
+      phoneVerified: false,
+      emailVerified: false,
+      department: loginRole === 'authority' ? registerDepartment : undefined,
+      authorityLevel: loginRole === 'authority' ? registerAuthorityLevel : undefined
     };
 
     try {
@@ -666,32 +1216,33 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProfile)
       });
-       const data = await res.json();
-      setCurrentUser(data);
-      if (data.role === 'admin') {
-        setUserRole('admin');
-        setShowAdminPanel(true);
-      } else if (data.role === 'authority' && data.verificationStatus === 'verified') {
-        setUserRole('authority');
-        setShowAdminPanel(true);
-      } else {
-        setUserRole('citizen');
-        setShowAdminPanel(false);
-      }
+      const data = await res.json();
+      
+      // Redirect to phone verification screen instead of direct login
+      setPhoneVerificationPendingUser(data);
+      setVerificationStep(1);
+      
       // Refresh list
       fetchLeaderboard();
-      setActiveTab('feed');
       // Reset form
       setLoginName('');
       setLoginEmail('');
       setRegisterPasswordInput('');
+      setRegisterPhoneInput('');
     } catch (err) {
       console.error('Error registering:', err);
       alert('Failed to register user profile.');
     }
   };
 
-  const handleAdminVerifyUser = async (targetUid: string, status: 'verified' | 'rejected', level?: 'level_1' | 'level_2' | 'level_3' | 'none') => {
+  const handleAdminVerifyUser = async (
+    targetUid: string, 
+    status: 'verified' | 'rejected', 
+    level?: 'level_1' | 'level_2' | 'level_3' | 'none',
+    role?: 'citizen' | 'authority' | 'admin',
+    department?: string,
+    authorityLevel?: string
+  ) => {
     try {
       const res = await fetch('/api/admin/verify-user', {
         method: 'POST',
@@ -699,7 +1250,10 @@ export default function App() {
         body: JSON.stringify({
           uid: targetUid,
           verificationStatus: status,
-          accessLevel: level || 'none'
+          accessLevel: level || 'none',
+          role,
+          department,
+          authorityLevel
         })
       });
       if (res.ok) {
@@ -710,7 +1264,7 @@ export default function App() {
           fetchUser(currentUser.uid);
         }
       } else {
-        alert('Failed to update authority verification state.');
+        alert('Failed to update authority state.');
       }
     } catch (err) {
       console.error('Error updating authority verification:', err);
@@ -803,7 +1357,8 @@ export default function App() {
         body: JSON.stringify({
           status: adminStatusChange,
           updaterName: 'Ward Operations Board',
-          description: adminNote || `Issue transitioned to ${STATUS_CONFIG[adminStatusChange].label} status by city officials.`
+          description: adminNote || `Issue transitioned to ${STATUS_CONFIG[adminStatusChange].label} status by city officials.`,
+          userId: currentUser?.uid
         })
       });
       const updated = await res.json();
@@ -868,6 +1423,7 @@ export default function App() {
         cameraStreamRef.current.getTracks().forEach(track => track.stop());
       }
 
+      setIsCameraSimulated(false);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       cameraStreamRef.current = stream;
       
@@ -887,9 +1443,10 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      console.error('Error opening camera stream:', err);
-      setCameraError('Camera access denied or resolution not supported. Please grant permissions and check connection.');
-      setIsLiveCameraActive(false);
+      console.warn('Error or permission dismissed opening real camera stream, activating high-fidelity GMC simulator camera:', err);
+      setIsCameraSimulated(true);
+      setCameraResolution('3840x2160 (Simulated 4K UHD Feed)');
+      setCameraError(null);
     }
   };
 
@@ -909,6 +1466,92 @@ export default function App() {
 
   // Capture high-resolution photo from stream
   const captureLivePhoto = () => {
+    if (isCameraSimulated) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1920;
+      canvas.height = 1080;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Draw a simulated high fidelity feed of Maharaj Bada patrol
+        const grad = ctx.createLinearGradient(0, 0, 1920, 1080);
+        grad.addColorStop(0, '#111827');
+        grad.addColorStop(0.5, '#1f2937');
+        grad.addColorStop(1, '#030712');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1920, 1080);
+
+        // Draw camera crosshairs and scanning grids
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.15)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 1920; i += 120) {
+          ctx.beginPath();
+          ctx.moveTo(i, 0);
+          ctx.lineTo(i, 1080);
+          ctx.stroke();
+        }
+        for (let j = 0; j < 1080; j += 120) {
+          ctx.beginPath();
+          ctx.moveTo(0, j);
+          ctx.lineTo(1920, j);
+          ctx.stroke();
+        }
+
+        // Draw simulated Maharaj Bada layout
+        ctx.fillStyle = '#374151';
+        ctx.fillRect(400, 400, 1120, 400); // Base building
+        ctx.fillStyle = '#4b5563';
+        ctx.fillRect(800, 200, 320, 200); // Main dome
+        ctx.beginPath();
+        ctx.arc(960, 200, 160, Math.PI, 2 * Math.PI);
+        ctx.fill();
+
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(410, 410, 1100, 380);
+
+        // HUD info overlay
+        ctx.fillStyle = '#10b981';
+        ctx.font = 'bold 36px monospace';
+        ctx.fillText('GMC CIVIL SAFETY PATROL SCANNER [4K SIMULATED]', 80, 120);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '24px monospace';
+        ctx.fillText(`LOCATION: Maharaj Bada, Lashkar, Gwalior`, 80, 170);
+        ctx.fillText(`COORDINATES: 26.2183° N, 78.1828° E`, 80, 215);
+        ctx.fillText(`TIMESTAMP: ${new Date().toLocaleString('en-IN')}`, 80, 260);
+        ctx.fillText(`DEVICE: GMC-PATROL-4K-SIM-V2`, 80, 305);
+
+        // Draw crosshair
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(960, 540, 60, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(900, 540);
+        ctx.lineTo(1020, 540);
+        ctx.moveTo(960, 480);
+        ctx.lineTo(960, 600);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 20px monospace';
+        ctx.fillText('TARGET LOCK: SECURE CORRIDOR', 980, 520);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        setReportImage(dataUrl);
+        stopLiveCamera();
+        addToast({
+          issueId: 'camera_sim_photo',
+          issueTitle: 'Simulator Capture',
+          newStatus: 'success',
+          type: 'general',
+          message: '4K Simulated Patrol Photo captured successfully!'
+        });
+      }
+      return;
+    }
+
     if (!liveVideoRef.current) return;
     const video = liveVideoRef.current;
     const canvas = document.createElement('canvas');
@@ -926,6 +1569,16 @@ export default function App() {
 
   // Start capturing video
   const startRecordingLiveVideo = () => {
+    if (isCameraSimulated) {
+      setIsRecordingLiveVideo(true);
+      setLiveVideoSeconds(0);
+      if (liveVideoTimerRef.current) clearInterval(liveVideoTimerRef.current);
+      liveVideoTimerRef.current = setInterval(() => {
+        setLiveVideoSeconds(prev => prev + 1);
+      }, 1000);
+      return;
+    }
+
     if (!cameraStreamRef.current) return;
 
     setIsRecordingLiveVideo(true);
@@ -978,6 +1631,56 @@ export default function App() {
     if (liveVideoTimerRef.current) {
       clearInterval(liveVideoTimerRef.current);
       liveVideoTimerRef.current = null;
+    }
+
+    if (isCameraSimulated) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1920;
+      canvas.height = 1080;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const grad = ctx.createLinearGradient(0, 0, 1920, 1080);
+        grad.addColorStop(0, '#020617');
+        grad.addColorStop(0.5, '#0f172a');
+        grad.addColorStop(1, '#1e293b');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1920, 1080);
+
+        ctx.fillStyle = '#3b82f6';
+        ctx.font = 'bold 36px monospace';
+        ctx.fillText('GMC LIVE PATROL VIDEO RECORDING [SIMULATED]', 80, 120);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '24px monospace';
+        ctx.fillText(`LOCATION: Maharaj Bada, Lashkar, Gwalior`, 80, 170);
+        ctx.fillText(`DURATION: ${liveVideoSeconds} seconds`, 80, 215);
+        ctx.fillText(`TIMESTAMP: ${new Date().toLocaleString('en-IN')}`, 80, 260);
+
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(960, 540, 80, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        ctx.fillStyle = '#3b82f6';
+        ctx.beginPath();
+        ctx.moveTo(940, 500);
+        ctx.lineTo(1000, 540);
+        ctx.lineTo(940, 580);
+        ctx.fill();
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        setReportImage(dataUrl);
+        addToast({
+          issueId: 'camera_sim_video',
+          issueTitle: 'Video Captured',
+          newStatus: 'success',
+          type: 'general',
+          message: '4K Simulated Patrol Video clip compiled successfully!'
+        });
+      }
+      stopLiveCamera();
+      return;
     }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -1411,6 +2114,27 @@ export default function App() {
     };
   }, [focusedLandmarkId]);
 
+  // Filter issues for the map tab
+  const filteredMapIssues = useMemo(() => {
+    return issues.filter(iss => {
+      // 1. Category filter
+      if (mapCategoryFilter !== 'all' && iss.category !== mapCategoryFilter) return false;
+      // 2. Severity filter
+      if (mapSeverityFilter !== 'all' && iss.severity !== mapSeverityFilter) return false;
+      // 3. Status filter
+      if (mapStatusFilter !== 'all' && iss.status !== mapStatusFilter) return false;
+      // 4. Search query
+      if (mapSearchQuery.trim() !== '') {
+        const q = mapSearchQuery.toLowerCase();
+        const matchesTitle = iss.title.toLowerCase().includes(q);
+        const matchesDesc = iss.description.toLowerCase().includes(q);
+        const matchesWard = (iss.wardName || '').toLowerCase().includes(q);
+        if (!matchesTitle && !matchesDesc && !matchesWard) return false;
+      }
+      return true;
+    });
+  }, [issues, mapCategoryFilter, mapSeverityFilter, mapStatusFilter, mapSearchQuery]);
+
   // Report map zoom and center calculations based on snap coordinate
   const reportMapTransformStyle = useMemo(() => {
     const snappedLandmark = GWALIOR_LANDMARKS.find(
@@ -1434,9 +2158,375 @@ export default function App() {
     };
   }, [reportLat, reportLng]);
 
-  return (
-    <div id="civic-pulse-app" className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
-      {!currentUser ? (
+  const renderAppContent = () => {
+    return (
+      <div className="flex-1 flex flex-col min-h-0 h-full relative overflow-hidden bg-slate-50 text-slate-800">
+        {simNetwork === 'offline' && (
+          <div className="bg-red-500 text-white text-[9px] font-black py-1 text-center uppercase tracking-widest shrink-0 z-50">
+            ⚠ Offline Mode Enabled • Serving Offline PWA Cache
+          </div>
+        )}
+        {phoneVerificationPendingUser ? (
+        <div id="otp-container" className="min-h-screen bg-gradient-to-br from-indigo-950 via-slate-950 to-orange-950 text-white flex flex-col justify-between font-sans">
+          {/* Header */}
+          <header className="px-6 py-4 flex items-center justify-between border-b border-white/5">
+            <div className="flex items-center space-x-3">
+              <div className="bg-gradient-to-tr from-orange-500 to-amber-500 text-white p-2 rounded-xl shadow-md">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-black tracking-tight text-white font-display">
+                  My Gwalior
+                </h1>
+                <p className="text-[10px] text-orange-400 font-extrabold uppercase tracking-wider leading-none mt-0.5">Hyperlocal Community</p>
+              </div>
+            </div>
+          </header>
+
+          <div className="flex-1 flex flex-col items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl text-center space-y-6">
+              <div className="mx-auto w-16 h-16 bg-orange-500/10 border border-orange-500/20 text-orange-500 rounded-2xl flex items-center justify-center">
+                <Shield className="w-8 h-8 animate-pulse" />
+              </div>
+              
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black tracking-tight">🔐 GMC Security Clearance</h2>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  In compliance with GMC Security Directive, citizens and authorities must verify both their active mobile number and email address to access the portal.
+                </p>
+              </div>
+
+              {/* Step Progress Bar */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-center space-x-2">
+                  <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-black ${verificationStep >= 1 ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-500'}`}>1</div>
+                  <div className={`h-0.5 w-10 ${verificationStep >= 2 ? 'bg-orange-500' : 'bg-slate-800'}`}></div>
+                  <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-black ${verificationStep >= 2 ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-500'}`}>2</div>
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-400 font-black px-6 uppercase tracking-wider">
+                  <span className={verificationStep === 1 ? 'text-orange-400' : 'text-slate-500'}>1. Mobile Verification</span>
+                  <span className={verificationStep === 2 ? 'text-orange-400' : 'text-slate-500'}>2. Email Verification</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/50 rounded-2xl p-4 border border-white/5 text-left space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Profile Identity</span>
+                  <span className="px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-400 text-[9px] font-black uppercase">
+                    {phoneVerificationPendingUser.role}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-3 pt-1">
+                  <img src={phoneVerificationPendingUser.avatar} className="w-8 h-8 rounded-full object-cover border border-white/20" />
+                  <div>
+                    <h4 className="text-xs font-bold text-white">{phoneVerificationPendingUser.name}</h4>
+                    <p className="text-[10px] text-slate-500 font-medium">{phoneVerificationPendingUser.email}</p>
+                  </div>
+                </div>
+              </div>
+
+              {verificationStep === 1 ? (
+                /* Step 1: Mobile OTP Verification */
+                <div className="space-y-4">
+                  {!otpSentCode ? (
+                    <div className="space-y-4 text-left">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Mobile Number (Indian Standard)</label>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-500">+91</span>
+                          <input
+                            type="text"
+                            maxLength={10}
+                            placeholder="Enter 10-digit mobile number"
+                            value={otpSentPhone || (phoneVerificationPendingUser.phone ? phoneVerificationPendingUser.phone.replace('+91 ', '') : '')}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setOtpSentPhone(val);
+                            }}
+                            className="w-full bg-slate-950 border border-white/10 rounded-xl pl-12 pr-4 py-3 text-xs font-bold focus:outline-none focus:border-orange-500 text-white min-h-[44px]"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const num = otpSentPhone || (phoneVerificationPendingUser.phone ? phoneVerificationPendingUser.phone.replace('+91 ', '') : '');
+                          if (num.length !== 10) {
+                            alert("Please enter a valid 10-digit mobile number.");
+                            return;
+                          }
+                          setIsOtpSending(true);
+                          
+                          // Simulate sending OTP SMS with a delay
+                          setTimeout(() => {
+                            const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+                            setOtpSentCode(randomCode);
+                            setIsOtpSending(false);
+                            setOtpCountdown(60);
+                            
+                            alert(`💬 Simulated SMS Dispatch: GMC security OTP code is [ ${randomCode} ] for cell +91 ${num}. This OTP is valid for 10 minutes.`);
+                          }, 1200);
+                        }}
+                        disabled={isOtpSending}
+                        className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-600/50 text-white font-extrabold text-xs py-3 rounded-xl transition shadow-md cursor-pointer flex items-center justify-center space-x-2 min-h-[44px]"
+                      >
+                        {isOtpSending ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Generating Secure OTP Tunnel...</span>
+                          </>
+                        ) : (
+                          <span>🔒 Send SMS OTP Verification</span>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 text-left">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Enter 6-Digit OTP Code</label>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          placeholder="Enter 6-digit OTP code"
+                          value={otpInput}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            setOtpInput(val);
+                          }}
+                          className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-center text-lg font-black tracking-widest focus:outline-none focus:border-orange-500 text-white min-h-[44px]"
+                        />
+                      </div>
+
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] p-3 rounded-xl leading-relaxed text-center">
+                        💬 Simulated SMS OTP sent to <strong>+91 {otpSentPhone || (phoneVerificationPendingUser.phone ? phoneVerificationPendingUser.phone.replace('+91 ', '') : '')}</strong>.<br />
+                        Use code <strong className="text-orange-400 underline">{otpSentCode}</strong> to verify!
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (otpInput !== otpSentCode) {
+                            alert("Invalid verification code. Please enter the correct code shown below.");
+                            return;
+                          }
+                          
+                          // Mobile is verified, advance to Step 2
+                          const verifiedPhone = `+91 ${otpSentPhone || (phoneVerificationPendingUser.phone ? phoneVerificationPendingUser.phone.replace('+91 ', '') : '')}`;
+                          setPhoneVerificationPendingUser(prev => prev ? {
+                            ...prev,
+                            phone: verifiedPhone,
+                            phoneVerified: true
+                          } : null);
+                          setVerificationStep(2);
+                          setOtpSentCode('');
+                          setOtpInput('');
+                          addToast({
+                            issueId: 'mobile_step',
+                            issueTitle: 'Mobile Verified',
+                            newStatus: 'success',
+                            type: 'general',
+                            message: 'Mobile number verification complete. Proceeding to Email Verification.'
+                          });
+                        }}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-3 rounded-xl transition shadow-md cursor-pointer flex items-center justify-center space-x-2 min-h-[44px]"
+                      >
+                        <span>🔐 Verify Mobile & Next Step</span>
+                      </button>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <button
+                          onClick={() => {
+                            setOtpSentCode('');
+                            setOtpInput('');
+                          }}
+                          className="hover:text-white underline"
+                        >
+                          Change Number
+                        </button>
+                        <span>
+                          Resend OTP in <strong className="text-orange-400">{otpCountdown}s</strong>
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Step 2: Email OTP Verification */
+                <div className="space-y-4">
+                  {!emailOtpSentCode ? (
+                    <div className="space-y-4 text-left">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Email Address</label>
+                        <input
+                          type="email"
+                          placeholder="your.email@domain.com"
+                          value={emailOtpSentAddress || phoneVerificationPendingUser.email}
+                          onChange={(e) => setEmailOtpSentAddress(e.target.value)}
+                          className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold focus:outline-none focus:border-orange-500 text-white min-h-[44px]"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const emailAddr = emailOtpSentAddress || phoneVerificationPendingUser.email;
+                          if (!emailAddr.trim() || !emailAddr.includes('@')) {
+                            alert("Please enter a valid email address.");
+                            return;
+                          }
+                          setIsEmailOtpSending(true);
+                          
+                          // Simulate sending Email OTP with a delay
+                          setTimeout(() => {
+                            const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
+                            setEmailOtpSentCode(randomCode);
+                            setIsEmailOtpSending(false);
+                            setEmailOtpCountdown(60);
+                            
+                            alert(`📧 Simulated Email Dispatch: Gwalior Municipal Corporation (GMC) safety verification code is [ ${randomCode} ] dispatched to ${emailAddr}.`);
+                          }, 1200);
+                        }}
+                        disabled={isEmailOtpSending}
+                        className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-600/50 text-white font-extrabold text-xs py-3 rounded-xl transition shadow-md cursor-pointer flex items-center justify-center space-x-2 min-h-[44px]"
+                      >
+                        {isEmailOtpSending ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Generating Secure Email Link...</span>
+                          </>
+                        ) : (
+                          <span>📧 Send Email OTP Verification</span>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 text-left">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Enter 6-Digit Email Code</label>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          placeholder="Enter 6-digit Email code"
+                          value={emailOtpInput}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            setEmailOtpInput(val);
+                          }}
+                          className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-center text-lg font-black tracking-widest focus:outline-none focus:border-orange-500 text-white min-h-[44px]"
+                        />
+                      </div>
+
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] p-3 rounded-xl leading-relaxed text-center">
+                        📧 Simulated Verification Code dispatched to <strong>{emailOtpSentAddress || phoneVerificationPendingUser.email}</strong>.<br />
+                        Use code <strong className="text-orange-400 underline">{emailOtpSentCode}</strong> to verify!
+                      </div>
+
+                      <button
+                        onClick={async () => {
+                          if (emailOtpInput !== emailOtpSentCode) {
+                            alert("Invalid email verification code. Please enter the correct code shown below.");
+                            return;
+                          }
+
+                          // Both Phone and Email are verified! Commit to backend
+                          try {
+                            const finalUser = {
+                              ...phoneVerificationPendingUser,
+                              email: emailOtpSentAddress || phoneVerificationPendingUser.email,
+                              emailVerified: true,
+                              phoneVerified: true
+                            };
+
+                            const res = await fetch('/api/users/profile', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(finalUser)
+                            });
+
+                            if (res.ok) {
+                              const data = await res.json();
+                              setCurrentUser(data);
+                              if (data.role === 'admin') {
+                                setUserRole('admin');
+                                setShowAdminPanel(true);
+                              } else if (data.role === 'authority' && data.verificationStatus === 'verified') {
+                                setUserRole('authority');
+                                setShowAdminPanel(true);
+                              } else {
+                                setUserRole('citizen');
+                                setShowAdminPanel(false);
+                              }
+                              setPhoneVerificationPendingUser(null);
+                              setOtpSentCode('');
+                              setOtpInput('');
+                              setOtpSentPhone('');
+                              setEmailOtpSentCode('');
+                              setEmailOtpInput('');
+                              setEmailOtpSentAddress('');
+                              setVerificationStep(1);
+                              setActiveTab('feed');
+                              
+                              addToast({
+                                issueId: 'dual_verification',
+                                issueTitle: 'Security Clearance Passed',
+                                newStatus: 'success',
+                                type: 'general',
+                                message: 'Welcome to Gwalior Nagar Nigam! Your identity (Email & Mobile) has been successfully verified.'
+                              });
+                            } else {
+                              alert("Failed to synchronize verification details with Gwalior database.");
+                            }
+                          } catch (err) {
+                            console.error("Error finalizing verification:", err);
+                            alert("Network error. Please try again.");
+                          }
+                        }}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs py-3 rounded-xl transition shadow-md cursor-pointer flex items-center justify-center space-x-2 min-h-[44px]"
+                      >
+                        <span>🔐 Verify Email & Unlock Portal</span>
+                      </button>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <button
+                          onClick={() => {
+                            setEmailOtpSentCode('');
+                            setEmailOtpInput('');
+                          }}
+                          className="hover:text-white underline"
+                        >
+                          Change Email
+                        </button>
+                        <span>
+                          Resend OTP in <strong className="text-orange-400">{emailOtpCountdown}s</strong>
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                onClick={() => {
+                  setPhoneVerificationPendingUser(null);
+                  setOtpSentCode('');
+                  setOtpInput('');
+                  setOtpSentPhone('');
+                  setEmailOtpSentCode('');
+                  setEmailOtpInput('');
+                  setEmailOtpSentAddress('');
+                  setVerificationStep(1);
+                }}
+                className="text-[11px] text-slate-400 hover:text-white block mx-auto underline transition"
+              >
+                ← Cancel and Back to Sign In
+              </button>
+
+            </div>
+          </div>
+
+          <footer className="px-6 py-4 border-t border-white/5 text-center text-[10px] text-slate-500">
+            Nagar Nigam Gwalior Citizen Portal © 2026. Made with ❤️ for community safety and digital governance.
+          </footer>
+        </div>
+      ) : !currentUser ? (
         <div id="login-container" className="min-h-screen bg-gradient-to-br from-indigo-950 via-slate-950 to-orange-950 text-white flex flex-col justify-between font-sans">
           {/* Header */}
           <header className="px-6 py-4 flex items-center justify-between border-b border-white/5">
@@ -1448,11 +2538,8 @@ export default function App() {
                 <h1 className="text-xl font-black tracking-tight text-white font-display">
                   My Gwalior
                 </h1>
-                <p className="text-[10px] text-orange-400 font-extrabold uppercase tracking-wider leading-none mt-0.5">Nagar Nigam Portal</p>
+                <p className="text-[10px] text-orange-400 font-extrabold uppercase tracking-wider leading-none mt-0.5">Hyperlocal Community</p>
               </div>
-            </div>
-            <div className="text-[10px] text-slate-400 font-mono">
-              Gwalior Municipal Corporation (GMC) • Live Server
             </div>
           </header>
 
@@ -1470,12 +2557,12 @@ export default function App() {
                     Report, Track, and Resolve Civic Issues in Gwalior.
                   </h2>
                   <p className="text-sm text-slate-400 leading-relaxed">
-                    Join Gwalior's smart Nagar Nigam portal where citizens can snap photos of local issues (potholes, water leaks, streetlights, garbage heaps) to automatically route reports to officials using real-time AI and location-aware dispatch pipelines.
+                    Join Gwalior's smart Nagar Nigam portal where citizens can snap photos of local issues to automatically route reports to officials using real-time AI.
                   </p>
                 </div>
 
                 <div className="mt-8 space-y-4">
-                  <div className="flex items-center space-x-3.5 bg-white/5 p-3.5 rounded-2xl border border-white/5 hover:bg-white/8">
+                  <div className="flex items-start space-x-3.5 bg-white/5 p-3.5 rounded-2xl border border-white/5 hover:bg-white/8">
                     <div className="p-2.5 rounded-xl bg-orange-500/15 text-orange-400 shrink-0">
                       <User className="w-5 h-5" />
                     </div>
@@ -1485,13 +2572,23 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-3.5 bg-white/5 p-3.5 rounded-2xl border border-white/5 hover:bg-white/8">
+                  <div className="flex items-start space-x-3.5 bg-white/5 p-3.5 rounded-2xl border border-white/5 hover:bg-white/8">
                     <div className="p-2.5 rounded-xl bg-red-500/15 text-red-400 shrink-0">
                       <Shield className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="text-xs font-extrabold text-white">Municipal Authorities</h4>
                       <p className="text-[11px] text-slate-400 mt-0.5">Review verified dispatch requests and transition official resolutions.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start space-x-3.5 bg-white/5 p-3.5 rounded-2xl border border-white/5 hover:bg-white/8">
+                    <div className="p-2.5 rounded-xl bg-purple-500/15 text-purple-400 shrink-0">
+                      <Shield className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-extrabold text-white">System Admin</h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Approve pending authorities, manage wards, and audit live GIS attendance.</p>
                     </div>
                   </div>
                 </div>
@@ -1729,26 +2826,98 @@ export default function App() {
                       </div>
 
                       <div>
+                        <label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">Mandatory Mobile Number</label>
+                        <input
+                          type="text"
+                          placeholder="e.g., +91 94251 12345"
+                          value={registerPhoneInput}
+                          onChange={(e) => setRegisterPhoneInput(e.target.value)}
+                          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs focus:outline-hidden focus:border-orange-500 text-white"
+                          required
+                        />
+                      </div>
+
+                      <div>
                         <label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">Profile Photo</label>
-                        <div className="flex items-center space-x-3">
-                          <img 
-                            src={loginAvatar} 
-                            alt="Avatar preview" 
-                            className="w-10 h-10 rounded-xl object-cover border border-white/15"
-                          />
-                          <select
-                            value={loginAvatar}
-                            onChange={(e) => setLoginAvatar(e.target.value)}
-                            className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs focus:outline-hidden text-white cursor-pointer font-bold"
-                          >
-                            <option value="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80">Male Portrait (Priyansh)</option>
-                            <option value="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80">Female Portrait (Ananya)</option>
-                            <option value="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80">Male Portrait (Kabir)</option>
-                            <option value="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80">Silhouette Placeholder</option>
-                          </select>
+                        <div className="flex flex-col space-y-2">
+                          <div className="flex items-center space-x-3">
+                            <img 
+                              src={loginAvatar} 
+                              alt="Avatar preview" 
+                              className="w-11 h-11 rounded-xl object-cover border border-white/15 shadow-sm shrink-0"
+                            />
+                            <select
+                              value={loginAvatar}
+                              onChange={(e) => setLoginAvatar(e.target.value)}
+                              className="flex-1 bg-slate-900 border border-white/10 rounded-xl px-3 py-2.5 text-xs focus:outline-hidden text-white cursor-pointer font-bold"
+                            >
+                              <option value="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80">Male Portrait (Priyansh)</option>
+                              <option value="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80">Female Portrait (Ananya)</option>
+                              <option value="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80">Male Portrait (Kabir)</option>
+                              <option value="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80">Silhouette Placeholder</option>
+                              {loginAvatar && !loginAvatar.startsWith('https://images.unsplash.com') && (
+                                <option value={loginAvatar}>Custom Uploaded Photo</option>
+                              )}
+                            </select>
+                          </div>
+                          
+                          <label className="cursor-pointer bg-slate-800 hover:bg-slate-750 text-slate-200 border border-white/10 hover:border-white/20 font-bold text-xs py-2 rounded-xl transition flex items-center justify-center space-x-1.5 w-full">
+                            <Upload className="w-4 h-4 text-orange-500" />
+                            <span>Select Custom Photo from Gallery</span>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    if (typeof reader.result === 'string') {
+                                      setLoginAvatar(reader.result);
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
                         </div>
                       </div>
                     </div>
+
+                    {loginRole === 'authority' && (
+                      <div className="space-y-3 p-3 bg-slate-800/40 border border-white/5 rounded-xl">
+                        <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Department & Level (विभाग एवं पद)</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-bold text-slate-300 block">Department</label>
+                            <select
+                              value={registerDepartment}
+                              onChange={(e) => setRegisterDepartment(e.target.value)}
+                              className="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-xs text-slate-200 focus:outline-none min-h-[44px] font-semibold"
+                            >
+                              {Object.entries(DEPARTMENTS).map(([key, val]) => (
+                                <option key={key} value={key} className="bg-slate-900 text-slate-200">{val.icon} {val.label}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-bold text-slate-300 block">Proposed Level</label>
+                            <select
+                              value={registerAuthorityLevel}
+                              onChange={(e) => setRegisterAuthorityLevel(e.target.value)}
+                              className="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-xs text-slate-200 focus:outline-none min-h-[44px] font-semibold"
+                            >
+                              {Object.entries(AUTHORITY_LEVELS).map(([key, val]) => (
+                                <option key={key} value={key} className="bg-slate-900 text-slate-200">{val.badge} {val.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {loginRole === 'authority' && (
                       <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-amber-300 text-[11px] leading-relaxed">
@@ -1791,7 +2960,7 @@ export default function App() {
               <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-orange-600 via-amber-600 to-indigo-950 bg-clip-text text-transparent font-display">
                 My Gwalior
               </h1>
-              <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wider leading-none mt-0.5">Nagar Nigam Portal</p>
+              <p className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wider leading-none mt-0.5">Hyperlocal Community</p>
             </div>
           </div>
 
@@ -1848,7 +3017,7 @@ export default function App() {
               <span>Profile</span>
             </button>
 
-            {currentUser?.role === 'admin' && (
+            {(currentUser?.role === 'admin' || (currentUser?.role === 'authority' && currentUser?.accessLevel === 'level_3')) && (
               <button 
                 onClick={() => { setActiveTab('admin_panel'); setSelectedIssue(null); }}
                 className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${activeTab === 'admin_panel' ? 'bg-indigo-600 text-white shadow-xs' : 'text-indigo-600 hover:bg-indigo-50 hover:text-indigo-950 bg-indigo-50/50'}`}
@@ -1861,37 +3030,7 @@ export default function App() {
 
           {/* Active Mode Role Switcher / Session Indicator */}
           <div className="flex items-center space-x-2">
-            {/* Elegant status indicator telling the user exactly who is using the app */}
-            <div className={`${currentUser.role === 'citizen' ? 'hidden sm:flex' : 'flex'} items-center space-x-1.5 bg-slate-50 px-2.5 sm:px-3 py-1.5 rounded-full border border-slate-200`} title={currentUser.role === 'admin' ? 'Admin Console' : currentUser.role === 'authority' ? (currentUser.verificationStatus === 'verified' ? `Authority (L${currentUser.accessLevel === 'level_3' ? '3' : currentUser.accessLevel === 'level_2' ? '2' : '1'})` : 'Auth (Pending)') : 'Citizen Mode'}>
-              <span className={`w-2 h-2 rounded-full ${
-                currentUser.role === 'admin' ? 'bg-purple-500 animate-pulse' : currentUser.role === 'authority' ? (currentUser.verificationStatus === 'verified' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse') : 'bg-blue-500'
-              }`} />
-              <span className="text-[11px] font-bold text-slate-600 font-mono">
-                <span className="sm:hidden">
-                  {currentUser.role === 'admin' ? '⚙️' : currentUser.role === 'authority' ? (currentUser.verificationStatus === 'verified' ? '🛡️' : '⏳') : '👤'}
-                </span>
-                <span className="hidden sm:inline">
-                  {currentUser.role === 'admin' ? '⚙️ Admin Console' : currentUser.role === 'authority' ? (currentUser.verificationStatus === 'verified' ? `🛡️ Authority (${currentUser.accessLevel === 'level_3' ? 'L3' : currentUser.accessLevel === 'level_2' ? 'L2' : 'L1'})` : '⏳ Auth (Pending)') : '👤 Citizen Mode'}
-                </span>
-              </span>
-            </div>
-
-            {/* If authority, allow toggling the admin panel visibility */}
-            {currentUser.role === 'authority' && currentUser.verificationStatus === 'verified' && (
-              <button
-                onClick={() => {
-                  setShowAdminPanel(!showAdminPanel);
-                  setUserRole(showAdminPanel ? 'citizen' : 'authority');
-                }}
-                className={`flex items-center space-x-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition duration-150 cursor-pointer ${
-                  showAdminPanel ? 'bg-red-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-                title={showAdminPanel ? 'Exit Officer View' : 'Enter Officer View'}
-              >
-                <Shield className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{showAdminPanel ? 'Exit Officer View' : 'Enter Officer View'}</span>
-              </button>
-            )}
+            {/* Enter Officer View button removed per user request */}
           </div>
 
           {/* User Profile Mini Badge & Sign Out */}
@@ -1902,12 +3041,28 @@ export default function App() {
                 className="flex items-center space-x-3 cursor-pointer hover:bg-slate-100 p-1.5 rounded-xl transition duration-150 border border-transparent hover:border-slate-200"
                 onClick={() => setActiveTab('profile')}
               >
-                <div className={`text-right ${currentUser.role === 'authority' ? 'hidden sm:block' : ''}`}>
-                  <h4 className="text-sm font-semibold text-slate-700">{currentUser.name}</h4>
-                  <div className="flex items-center justify-end space-x-1.5 text-xs text-amber-600 font-bold">
-                    <Award className="w-3.5 h-3.5" />
-                    <span>{currentUser.points} pts</span>
-                  </div>
+                <div className="text-right flex flex-col items-end justify-center">
+                  <h4 className="text-xs sm:text-sm font-semibold text-slate-700 leading-tight">{currentUser.name}</h4>
+                  {currentUser.role === 'authority' ? (
+                    <div className="text-[8px] sm:text-[9px] text-emerald-600 font-bold flex items-center justify-end gap-1 mt-0.5 font-sans">
+                      <span>
+                        {currentUser.accessLevel === 'level_3'
+                          ? 'Municipal Commissioner'
+                          : currentUser.accessLevel === 'level_2'
+                          ? 'Dept Head'
+                          : 'Field Inspector'}
+                      </span>
+                    </div>
+                  ) : currentUser.role === 'admin' ? (
+                    <div className="text-[9px] text-purple-600 font-bold flex items-center justify-end gap-1 mt-0.5 font-sans">
+                      <span>System Admin</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-end space-x-1.5 text-xs text-amber-600 font-bold">
+                      <Award className="w-3.5 h-3.5" />
+                      <span>{currentUser.points} pts</span>
+                    </div>
+                  )}
                 </div>
                 <img 
                   src={currentUser.avatar} 
@@ -1934,7 +3089,7 @@ export default function App() {
       </header>
 
       {/* Main Layout Grid */}
-      <main className="flex-1 w-full p-4 md:p-8 flex flex-col gap-6">
+      <main className="flex-1 w-full pt-4 pb-4 px-0 md:pt-8 md:pb-8 md:px-0 flex flex-col gap-6">
         
         {/* Primary Dynamic Content Canvas */}
         <section className="w-full">
@@ -1948,29 +3103,29 @@ export default function App() {
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
-                className="space-y-6"
+                className="space-y-6 px-[5px]"
               >
                 {/* Search & Filters block - Box styling removed, elements rendered full size */}
-                <div className="flex flex-col md:flex-row gap-4 items-center w-full">
+                <div className="flex flex-col md:flex-row gap-3 items-center w-full">
                   <div className="relative flex-1 w-full">
-                    <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                      <Search className="w-5 h-5 text-slate-400" />
+                    <div className="absolute inset-y-0 left-3.5 flex items-center pointer-events-none">
+                      <Search className="w-4 h-4 text-slate-400" />
                     </div>
                     <input 
                       type="text" 
                       placeholder="Search reported issues by ward, title or description..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-base shadow-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500 transition"
+                      className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm shadow-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500 transition"
                     />
                   </div>
 
                   {/* Filter category selector */}
-                  <div className="flex gap-2 w-full md:w-auto shrink-0 overflow-x-auto pb-2 md:pb-0 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-                    <div className="flex items-center space-x-1 bg-white p-1 rounded-xl border border-slate-200 text-xs shadow-xs flex-nowrap shrink-0 min-w-max">
+                  <div className="flex gap-1.5 w-full md:w-auto shrink-0 overflow-x-auto pb-1.5 md:pb-0 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                    <div className="flex items-center space-x-1 bg-white p-0.5 rounded-lg border border-slate-200 text-xs shadow-xs flex-nowrap shrink-0 min-w-max">
                       <button 
                         onClick={() => setSelectedCategory('all')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 ${selectedCategory === 'all' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer whitespace-nowrap shrink-0 ${selectedCategory === 'all' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}
                       >
                         All
                       </button>
@@ -1980,7 +3135,7 @@ export default function App() {
                           <button
                             key={cat}
                             onClick={() => setSelectedCategory(cat)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1 transition cursor-pointer whitespace-nowrap shrink-0 ${selectedCategory === cat ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center space-x-1 transition cursor-pointer whitespace-nowrap shrink-0 ${selectedCategory === cat ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}
                           >
                             <span>{icon.label}</span>
                           </button>
@@ -1994,7 +3149,7 @@ export default function App() {
                     <select
                       value={selectedStatus}
                       onChange={(e) => setSelectedStatus(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-2xl px-4 py-3 text-sm font-semibold focus:outline-hidden text-slate-700 shadow-xs cursor-pointer"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-hidden text-slate-700 shadow-xs cursor-pointer"
                     >
                       <option value="all">All Statuses</option>
                       {Object.entries(STATUS_CONFIG).map(([key, config]) => (
@@ -2006,19 +3161,19 @@ export default function App() {
                 </div>
 
                 {/* Subtitle / Match summary & Grid Layout Toggles */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between px-1 gap-4 bg-slate-50 border border-slate-200/60 p-4 rounded-2xl shadow-2xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between px-1 gap-3 bg-slate-50 border border-slate-200/60 p-3.5 rounded-xl shadow-2xs">
                   <div>
-                    <h3 className="font-bold text-slate-800 text-base flex items-center space-x-2">
-                      <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
-                      <span>{filteredIssues.length} matching incidents discovered</span>
+                    <h3 className="font-bold text-slate-800 text-sm flex items-center space-x-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+                      <span className="pl-[2px]">{filteredIssues.length} matching incidents discovered</span>
                     </h3>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Automated citizen tracking and municipal response portal</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5 pl-[12px]">Automated citizen tracking and municipal response portal</p>
                   </div>
                   
                   {/* Grid View Controls */}
                   <div className="flex items-center justify-between sm:justify-end gap-4 text-xs w-full sm:w-auto">
                     {/* Mobile toggle controls - visible only on mobile */}
-                    <div className="flex items-center space-x-2 md:hidden">
+                    <div className="flex items-center space-x-2 md:hidden pl-[15px]">
                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Layout:</span>
                       <div className="bg-white border border-slate-200 p-0.5 rounded-xl flex items-center shadow-2xs">
                         <button
@@ -2398,21 +3553,255 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* Endorsement section */}
-                      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mt-6 flex items-center justify-between">
-                        <div className="space-y-1">
-                          <h4 className="font-bold text-blue-900 text-sm">Community Endorsements ({selectedIssue.confirmations})</h4>
-                          <p className="text-blue-700 text-xs">
-                            Is this issue still unresolved? Confirming escalates severity.
-                          </p>
+                      {/* Citizen Community Verification Hub */}
+                      <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-5 mt-6 space-y-5 shadow-xs">
+                        <div className="flex items-start justify-between">
+                          <div className="space-y-1">
+                            <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
+                              <Shield className="w-4.5 h-4.5 text-blue-600" />
+                              <span>Citizen Community Verification Hub</span>
+                            </h4>
+                            <p className="text-slate-500 text-[11px] leading-normal max-w-md">
+                              Verify active reports to help city engineers act faster. Reports with 10+ citizen verifications are officially upgraded and prioritized.
+                            </p>
+                          </div>
+                          <span className="text-[10px] bg-blue-50 text-blue-600 font-bold px-2 py-0.5 rounded-md border border-blue-100">
+                            +10 Points
+                          </span>
                         </div>
-                        <button
-                          onClick={() => handleConfirmIssue(selectedIssue.id)}
-                          className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-1.5 shadow-sm transition ${selectedIssue.confirmedBy.includes(currentUser?.uid || '') ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-white text-blue-600 hover:bg-blue-50 border border-blue-200'}`}
-                        >
-                          <ThumbsUp className="w-4 h-4" />
-                          <span>{selectedIssue.confirmedBy.includes(currentUser?.uid || '') ? 'Confirmed' : 'Confirm Presence'}</span>
-                        </button>
+
+                        {/* Progress Tracker */}
+                        <div className="bg-white p-3.5 rounded-xl border border-slate-100 space-y-2">
+                          <div className="flex items-center justify-between text-xs font-semibold">
+                            <span className="text-slate-600">Verification Progress</span>
+                            <span className="text-blue-600 font-bold">{selectedIssue.confirmations} / 10 Citizens</span>
+                          </div>
+                          
+                          <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                            <div 
+                              className="bg-gradient-to-r from-blue-500 to-indigo-600 h-full rounded-full transition-all duration-500" 
+                              style={{ width: `${Math.min((selectedIssue.confirmations / 10) * 100, 100)}%` }}
+                            />
+                          </div>
+
+                          {selectedIssue.confirmations >= 10 ? (
+                            <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-bold mt-1 animate-pulse">
+                              <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                              <span>Official Community Verified Status Achieved! Priority escalated (+10 index).</span>
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-slate-400">
+                              Requires {10 - selectedIssue.confirmations} more nearby citizen validations to reach official verified status.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Interactive Verification Form */}
+                        {currentUser ? (
+                          selectedIssue.confirmedBy.includes(currentUser.uid) ? (
+                            /* Already verified state */
+                            <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-xl space-y-3">
+                              <div className="flex items-start gap-2.5">
+                                <div className="bg-emerald-100 text-emerald-600 p-1 rounded-full shrink-0">
+                                  <Check className="w-4 h-4 stroke-[3px]" />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <p className="text-xs font-bold text-emerald-800">You verified this issue</p>
+                                  <p className="text-[11px] text-emerald-600 leading-normal">
+                                    Your spot verification is officially logged. You earned +10 Civic Points. Thank you for stewardship!
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex justify-end pt-1">
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await handleConfirmIssue(selectedIssue.id);
+                                  }}
+                                  className="text-[10px] text-rose-500 hover:text-rose-700 font-bold flex items-center gap-1 transition cursor-pointer"
+                                >
+                                  Retract Verification
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Verification form */
+                            <div className="space-y-4">
+                              {/* Pill selection */}
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                                  Verification Role / Relationship
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {(['sight', 'resident', 'commuter'] as const).map((role) => (
+                                    <button
+                                      key={role}
+                                      type="button"
+                                      onClick={() => setVerifyRole(role)}
+                                      className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold border transition cursor-pointer text-center ${
+                                        verifyRole === role
+                                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                      }`}
+                                    >
+                                      {role === 'sight' && '👁️ Eye Witness'}
+                                      {role === 'resident' && '🏠 Near My Area'}
+                                      {role === 'commuter' && '🚗 Commuter'}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* GPS Check-In Toggle */}
+                              <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-100 text-xs">
+                                <div className="flex items-center gap-2">
+                                  <MapPin className={`w-4 h-4 ${verifyGpsCheck ? 'text-red-500 animate-bounce' : 'text-slate-400'}`} />
+                                  <div className="text-left">
+                                    <span className="font-bold text-slate-700 block text-[11px]">Secure GPS Spot Verification</span>
+                                    <span className="text-[9px] text-slate-400 font-mono">
+                                      Coordinates match: ({selectedIssue.latitude.toFixed(4)}, {selectedIssue.longitude.toFixed(4)})
+                                    </span>
+                                  </div>
+                                </div>
+                                <input
+                                  type="checkbox"
+                                  checked={verifyGpsCheck}
+                                  onChange={(e) => setVerifyGpsCheck(e.target.checked)}
+                                  className="w-4 h-4 text-blue-600 border-slate-300 rounded-sm focus:ring-blue-500"
+                                />
+                              </div>
+
+                              {/* Quick tags */}
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                                  Quick Status Update Tag
+                                </label>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {[
+                                    '⚠️ Issue is active & dangerous',
+                                    '🚧 Severe hazard to vehicles',
+                                    '💧 Flooding / waste spreading',
+                                    '❌ Not resolved yet'
+                                  ].map((tag) => (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      onClick={() => setVerifyCustomNote(tag)}
+                                      className="py-1 px-2.5 rounded-full text-[9px] font-bold bg-white text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-600 transition cursor-pointer"
+                                    >
+                                      {tag}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Custom Note input */}
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                                  Verification Note (Optional)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={verifyCustomNote}
+                                  onChange={(e) => setVerifyCustomNote(e.target.value)}
+                                  placeholder="Provide any helpful onsite observation..."
+                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:ring-1 focus:ring-blue-500 transition"
+                                />
+                              </div>
+
+                              {/* Verification Action Button */}
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  // Submit the verification!
+                                  const isCurrentlyConfirmed = selectedIssue.confirmedBy.includes(currentUser.uid);
+                                  await handleConfirmIssue(selectedIssue.id);
+
+                                  if (!isCurrentlyConfirmed) {
+                                    let proofText = `📢 [COMMUNITY VERIFIED] `;
+                                    if (verifyRole === 'sight') proofText += `Verified via eye witness site-inspection. `;
+                                    if (verifyRole === 'resident') proofText += `Verified by local resident living nearby. `;
+                                    if (verifyRole === 'commuter') proofText += `Verified by frequent commuter. `;
+
+                                    if (verifyGpsCheck) {
+                                      proofText += `📍 On-spot GPS check-in matched at (${selectedIssue.latitude.toFixed(4)}, ${selectedIssue.longitude.toFixed(4)}). `;
+                                    }
+
+                                    if (verifyCustomNote.trim()) {
+                                      proofText += `\nObservation: "${verifyCustomNote.trim()}"`;
+                                    } else {
+                                      proofText += `\nObservation: "I confirm that this issue is active, unresolved, and requires attention."`;
+                                    }
+
+                                    try {
+                                      await fetch(`/api/issues/${selectedIssue.id}/comments`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          userId: currentUser.uid,
+                                          userName: currentUser.name,
+                                          userAvatar: currentUser.avatar,
+                                          text: proofText
+                                        })
+                                      });
+                                      
+                                      setVerifyCustomNote('');
+                                      
+                                      // Refetch issue to update comments feed in detail panel
+                                      const res = await fetch(`/api/issues`);
+                                      const allIssues = await res.json();
+                                      const updatedIssue = allIssues.find((i: any) => i.id === selectedIssue.id);
+                                      if (updatedIssue) {
+                                        setIssues(allIssues);
+                                        setSelectedIssue(updatedIssue);
+                                      }
+                                    } catch (err) {
+                                      console.error('Error posting verification comment:', err);
+                                    }
+                                  }
+                                }}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-xs cursor-pointer transition transform hover:scale-[1.01]"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                                <span>Submit Citizen Verification (+10 Points)</span>
+                              </button>
+                            </div>
+                          )
+                        ) : (
+                          <div className="bg-slate-100 text-slate-600 text-xs text-center py-3 px-4 rounded-xl border border-slate-200">
+                            Please log in or register to verify reported community issues and earn Civic Points.
+                          </div>
+                        )}
+
+                        {/* Avatar stack / proof feed */}
+                        <div className="flex items-center gap-2 border-t border-slate-200/60 pt-3 text-[10px] text-slate-500">
+                          <div className="flex -space-x-1.5 overflow-hidden">
+                            <img 
+                              className="inline-block h-5.5 w-5.5 rounded-full ring-2 ring-white object-cover" 
+                              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80" 
+                              alt="Steward" 
+                            />
+                            <img 
+                              className="inline-block h-5.5 w-5.5 rounded-full ring-2 ring-white object-cover" 
+                              src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80" 
+                              alt="Steward" 
+                            />
+                            <img 
+                              className="inline-block h-5.5 w-5.5 rounded-full ring-2 ring-white object-cover" 
+                              src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80" 
+                              alt="Steward" 
+                            />
+                          </div>
+                          <span>
+                            Verified by {selectedIssue.confirmations > 0 ? (
+                              <>
+                                <strong>Gwalior citizens</strong> and <strong>{selectedIssue.confirmations} steward{selectedIssue.confirmations > 1 ? 's' : ''}</strong>
+                              </>
+                            ) : (
+                              "Gwalior local stewards"
+                            )}
+                          </span>
+                        </div>
                       </div>
 
                     </div>
@@ -2705,7 +4094,7 @@ export default function App() {
                 className="w-full max-w-5xl mx-auto text-left"
               >
                 {/* Form column */}
-                <form onSubmit={handleReportSubmit} className="w-full bg-white rounded-3xl border border-slate-200/80 p-6 md:p-10 shadow-sm flex flex-col space-y-8">
+                <form onSubmit={handleReportSubmit} className="w-full bg-white rounded-3xl border border-slate-200/80 pt-6 pb-6 pr-[5px] pl-[5px] md:pt-10 md:pb-10 md:pr-[5px] md:pl-[5px] shadow-sm flex flex-col space-y-8">
                   {/* Google style Header with vibrant banner badge */}
                   <div className="border-b border-slate-100 pb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="text-left">
@@ -2719,7 +4108,7 @@ export default function App() {
                         </span>
                       </div>
                       <h2 className="text-2xl font-bold text-slate-800 tracking-tight font-display pl-[5px] ml-[10px] mr-[10px]">Submit an Incident Report</h2>
-                      <p className="text-xs text-slate-500 mt-1 ml-[15px] mr-[15px] pl-[6px]">Provide local evidence for real-time automated AI cataloging and multi-agent routing.</p>
+                      <p className="text-[10.5px] text-slate-500 mt-1 ml-[15px] mr-[15px] pl-[6px]">Provide local evidence for real-time automated AI cataloging and multi-agent routing.</p>
                     </div>
                   </div>
 
@@ -2727,17 +4116,17 @@ export default function App() {
                     {/* Left Grid Column: Details & Multimedia */}
                     <div className="space-y-6">
                       {/* SECTION 1: Core Incident Details */}
-                  <div className="bg-slate-50/30 rounded-2xl border border-slate-100/50 pt-5 pl-5 pr-5 pb-0 mb-0 space-y-5 text-left">
+                  <div className="bg-slate-50/30 rounded-2xl border border-slate-100/50 pt-0 pr-[12px] pl-[12px] pb-0 ml-0 mr-0 mb-0 space-y-5 text-left">
                     <div className="flex items-center space-x-2.5 border-b border-slate-150 pb-2 mb-2">
                       <div className="p-1.5 bg-blue-50 rounded-xl text-blue-600">
                         <FileText className="w-4 h-4" />
                       </div>
-                      <h3 className="text-sm font-bold text-slate-800 tracking-tight font-display">1. Incident Details</h3>
+                      <h3 className="text-[12px] font-bold text-slate-800 tracking-tight font-display">1. Incident Details</h3>
                     </div>
 
                     {/* Title Input */}
                     <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700 tracking-wide">Short Descriptive Title</label>
+                      <label className="block text-[11.5px] font-bold text-slate-700 tracking-wide">Short Descriptive Title</label>
                       <div className="relative group">
                         <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-blue-500 transition-colors">
                           <Tag className="w-4 h-4" />
@@ -2751,12 +4140,12 @@ export default function App() {
                           required
                         />
                       </div>
-                      <p className="text-[10px] text-slate-400">Keep it clear and precise to improve automated department cataloging.</p>
+                      <p className="text-[10px] text-slate-400 pl-[10px] pr-[10px]">Keep it clear and precise to improve automated department cataloging.</p>
                     </div>
 
                     {/* Description Textarea */}
                     <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-700 tracking-wide">Context or Description</label>
+                      <label className="block text-[11.5px] font-bold text-slate-700 tracking-wide">Context or Description</label>
                       <div className="relative group">
                         <div className="absolute left-3.5 top-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors">
                           <MessageSquare className="w-4 h-4" />
@@ -2821,13 +4210,42 @@ export default function App() {
                       ) : isLiveCameraActive ? (
                         <div className="relative h-96 rounded-2xl overflow-hidden border border-slate-300 bg-slate-950 flex flex-col justify-between shadow-lg">
                           {/* Stream Viewport */}
-                          <video 
-                            ref={liveVideoRef} 
-                            autoPlay 
-                            playsInline 
-                            muted 
-                            className="absolute inset-0 w-full h-full object-cover"
-                          />
+                          {isCameraSimulated ? (
+                            <div className="absolute inset-0 w-full h-full bg-slate-900 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+                              {/* Glowing digital radar backdrop */}
+                              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-800 via-slate-950 to-black opacity-90"></div>
+                              <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_45%,rgba(16,185,129,0.15)_50%,rgba(16,185,129,0.05)_55%,transparent_60%)] animate-[pulse_3s_infinite] pointer-events-none"></div>
+
+                              {/* Target crosshair markers */}
+                              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 border border-emerald-500/20 rounded-full animate-[spin_20s_linear_infinite] pointer-events-none flex items-center justify-center">
+                                <div className="w-24 h-24 border border-dashed border-emerald-500/30 rounded-full"></div>
+                              </div>
+
+                              <div className="relative z-10 flex flex-col items-center space-y-3.5 max-w-xs">
+                                <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 animate-pulse flex items-center justify-center">
+                                  <Camera className="w-7 h-7" />
+                                </div>
+                                <div className="space-y-1">
+                                  <h4 className="font-extrabold text-[12px] text-slate-100 uppercase tracking-widest">GMC Virtual Camera Simulator</h4>
+                                  <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                                    Iframe sandbox is active. The system has automatically fallback-synchronized with the Maharaj Bada central feed telemetry.
+                                  </p>
+                                </div>
+                                <div className="inline-flex items-center space-x-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-amber-400 text-[9px] font-bold">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                                  <span>Simulator Active</span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <video 
+                              ref={liveVideoRef} 
+                              autoPlay 
+                              playsInline 
+                              muted 
+                              className="absolute inset-0 w-full h-full object-cover"
+                            />
+                          )}
                           
                           {/* DSLR Style Grid Lines Overlay */}
                           <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 opacity-20 pointer-events-none">
@@ -2956,7 +4374,7 @@ export default function App() {
                             </label>
                           </div>
                           
-                          {/* Live Camera Actions Area */}
+                           {/* Live Camera Actions Area */}
                           <div className="grid grid-cols-2 gap-3">
                             <button
                               type="button"
@@ -2964,7 +4382,7 @@ export default function App() {
                               className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl py-3 text-xs font-bold transition flex items-center justify-center space-x-2 cursor-pointer shadow-xs active:scale-98"
                             >
                               <Camera className="w-4 h-4 text-orange-400 animate-pulse" />
-                              <span>Take Live Photo</span>
+                              <span className="text-[10.5px] leading-[12px]">Take Live Photo</span>
                             </button>
                             <button
                               type="button"
@@ -2972,7 +4390,7 @@ export default function App() {
                               className="bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl py-3 text-xs font-extrabold transition flex items-center justify-center space-x-2 cursor-pointer shadow-xs active:scale-98"
                             >
                               <Video className="w-4 h-4" />
-                              <span>Record Live Video</span>
+                              <span className="text-[10.5px] h-[12px]">Record Live Video</span>
                             </button>
                           </div>
                         </div>
@@ -3033,96 +4451,133 @@ export default function App() {
 
                     {/* Right Grid Column: Location & Mapping */}
                     <div className="space-y-6">
-                      {/* SECTION 3: Geotag & Coordinates Calibration */}
-                      <div className="bg-slate-50/30 rounded-2xl border border-slate-100/50 pt-[1px] pl-5 pr-5 pb-5 space-y-4 text-left">
-                    <div className="flex items-center space-x-2.5 border-b border-slate-150 pb-2 mb-2">
-                      <div className="p-1.5 bg-blue-50 rounded-xl text-blue-600">
-                        <MapPin className="w-4 h-4" />
-                      </div>
-                      <h3 className="text-sm font-bold text-slate-800 tracking-tight font-display">3. Location & GPS Calibration</h3>
-                    </div>
-
-                    {/* Displays coordinates as premium chips instead of flat raw inputs */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-white border border-slate-200/80 p-3 rounded-xl flex flex-col shadow-2xs">
-                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">GPS Latitude</span>
-                        <div className="flex items-center space-x-1.5 mt-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-                          <span className="text-xs font-mono font-bold text-slate-800">{reportLat.toFixed(5)}</span>
+                      {/* SECTION 3: Evidence Live GPS Capture */}
+                      <div className="bg-slate-50/50 rounded-2xl border border-slate-200/80 p-5 mb-[9px] space-y-4 text-left shadow-xs">
+                        <div className="flex items-center justify-between border-b border-slate-150 pb-2.5">
+                          <div className="flex items-center space-x-2.5">
+                            <div className="p-1.5 bg-blue-50 rounded-xl text-blue-600">
+                              <Compass className="w-4 h-4 animate-spin-slow" />
+                            </div>
+                            <div>
+                              <h3 className="text-sm font-bold text-slate-800 tracking-tight font-display">3. Evidence Live GPS Capture</h3>
+                              <p className="text-[10px] text-slate-500 font-medium">Verify actual on-field location for instant municipal action</p>
+                            </div>
+                          </div>
+                          
+                          {/* Live signal indicator */}
+                          <div className="flex items-center space-x-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-full shrink-0">
+                            <span className="relative flex h-2 w-2">
+                              {geolocationStatus.type === 'loading' ? (
+                                <>
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                </>
+                              ) : geolocationStatus.type === 'success' ? (
+                                <>
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </>
+                              ) : geolocationStatus.type === 'error' ? (
+                                <>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>
+                                </>
+                              )}
+                            </span>
+                            <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">
+                              {geolocationStatus.type === 'idle' && 'No Lock'}
+                              {geolocationStatus.type === 'loading' && 'Locking...'}
+                              {geolocationStatus.type === 'success' && 'GPS Live'}
+                              {geolocationStatus.type === 'error' && 'Failed'}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="bg-white border border-slate-200/80 p-3 rounded-xl flex flex-col shadow-2xs">
-                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">GPS Longitude</span>
-                        <div className="flex items-center space-x-1.5 mt-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
-                          <span className="text-xs font-mono font-bold text-slate-800">{reportLng.toFixed(5)}</span>
+
+                        {/* Displays coordinates as premium digital gauges */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-white border border-slate-200 p-3 rounded-xl flex flex-col shadow-2xs relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
+                            <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest">Evidence Lat</span>
+                            <span className="text-xs font-mono font-bold text-slate-800 mt-1">{reportLat.toFixed(5)}° N</span>
+                          </div>
+                          <div className="bg-white border border-slate-200 p-3 rounded-xl flex flex-col shadow-2xs relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500" />
+                            <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest">Evidence Lng</span>
+                            <span className="text-xs font-mono font-bold text-slate-800 mt-1">{reportLng.toFixed(5)}° E</span>
+                          </div>
                         </div>
-                      </div>
-                    </div>
 
-                    {/* Geolocation Trigger Button */}
-                    <div className="space-y-1.5">
-                      <button
-                        type="button"
-                        onClick={handleGeoLocation}
-                        className={`w-full flex items-center justify-center space-x-2 border font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition duration-300 cursor-pointer shadow-2xs active:scale-99 ${
-                          geolocationStatus.type === 'loading'
-                            ? 'bg-amber-50 border-amber-200 text-amber-700 animate-pulse'
-                            : geolocationStatus.type === 'success'
-                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                            : geolocationStatus.type === 'error'
-                            ? 'bg-red-50 border-red-200 text-red-700'
-                            : 'bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-700'
-                        }`}
-                      >
-                        <MapPin className={`w-4 h-4 ${geolocationStatus.type === 'loading' ? 'animate-bounce' : ''}`} />
-                        <span>
-                          {geolocationStatus.type === 'loading'
-                            ? 'Calibrating GPS Satellites...'
-                            : geolocationStatus.type === 'success'
-                            ? 'GPS Location Acquired!'
-                            : geolocationStatus.type === 'error'
-                            ? 'GPS Failed - Tap to Retry'
-                            : 'Auto-Detect Device GPS Location'}
-                        </span>
-                      </button>
-
-                      {geolocationStatus.message && (
-                        <p className={`text-[10px] text-center font-bold tracking-tight ${
-                          geolocationStatus.type === 'success'
-                            ? 'text-emerald-600'
-                            : geolocationStatus.type === 'error'
-                            ? 'text-red-600'
-                            : 'text-amber-600'
-                        }`}>
-                          {geolocationStatus.message}
+                        {/* Informational guide */}
+                        <p className="text-[11px] text-slate-500 leading-relaxed bg-blue-50/30 border border-blue-100/50 rounded-xl p-3">
+                          💡 <strong>Why this matters:</strong> By sharing your live location, you provide Gwalior authorities with verified satellite coordinates. This enables field engineers to navigate directly to the spot without delays.
                         </p>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* SECTION 4: Digital Twin Pin Placement */}
-                  <div className="bg-slate-50/30 rounded-2xl border border-slate-100/50 pl-[5px] pr-[5px] pt-0 pb-[5px] mb-[15px] space-y-4 text-left">
-                    {/* Modern Google-style Header */}
-                    <div className="flex items-center space-x-2.5 border-b border-slate-150 pb-2 mb-2">
-                      <div className="p-1.5 bg-rose-50 rounded-xl text-rose-500">
-                        <MapPin className="w-4 h-4" />
+                        {/* Action Button */}
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={handleGeoLocation}
+                            className={`w-full flex items-center justify-center space-x-2.5 border font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition duration-300 cursor-pointer shadow-2xs active:scale-99 ${
+                              geolocationStatus.type === 'loading'
+                                ? 'bg-amber-50 border-amber-300 text-amber-700 animate-pulse'
+                                : geolocationStatus.type === 'success'
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100/80'
+                                : geolocationStatus.type === 'error'
+                                ? 'bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100/80'
+                                : 'bg-gradient-to-r from-blue-600 to-indigo-600 border-blue-700 hover:from-blue-700 hover:to-indigo-700 text-white hover:shadow-sm'
+                            }`}
+                          >
+                            <Compass className={`w-4 h-4 ${geolocationStatus.type === 'loading' ? 'animate-spin' : ''}`} />
+                            <span className="text-[11px]">
+                              {geolocationStatus.type === 'loading'
+                                ? 'Connecting to GPS Satellites...'
+                                : geolocationStatus.type === 'success'
+                                ? 'GPS Signal Locked! Tap to Refresh'
+                                : geolocationStatus.type === 'error'
+                                ? 'GPS Blocked - Tap to Retry'
+                                : 'Share Evidence Live GPS Location'}
+                            </span>
+                          </button>
+
+                          {geolocationStatus.message && (
+                            <div className={`p-2.5 rounded-lg text-[10px] font-bold text-center border ${
+                              geolocationStatus.type === 'success'
+                                ? 'bg-emerald-50/50 border-emerald-200 text-emerald-700'
+                                : geolocationStatus.type === 'error'
+                                ? 'bg-rose-50/50 border-rose-200 text-rose-700'
+                                : 'bg-amber-50/50 border-amber-200 text-amber-700'
+                            }`}>
+                              {geolocationStatus.message}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <h3 className="font-bold text-slate-800 text-sm tracking-tight font-display">4. Digital Twin Pin Placement</h3>
-                      </div>
-                    </div>
+
+                      {/* SECTION 4: Digital Twin Pin Placement */}
+                      <div className="bg-slate-50/30 rounded-2xl border border-slate-100/50 pl-[5px] pr-[5px] pt-[10px] pb-[5px] mb-[15px] space-y-4 text-left">
+                        {/* Modern Google-style Header */}
+                        <div className="flex items-center space-x-2.5 border-b border-slate-150 pb-2 mb-2">
+                          <div className="p-1.5 bg-rose-50 rounded-xl text-rose-500">
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                          <div className="text-left">
+                            <h3 className="font-bold text-slate-800 text-sm tracking-tight font-display">4. Digital Twin Pin Placement</h3>
+                          </div>
+                        </div>
                     
-                    <p className="text-xs text-slate-500 leading-relaxed text-left pl-[5px] ml-[5px] mb-[10px]">
+                    <p className="text-[10.5px] text-slate-500 leading-relaxed text-left pl-[5px] ml-[5px] mb-[10px]">
                       Click anywhere on the styled map grid below to re-center the incident marker, or snap directly to a known landmark.
                     </p>
 
                     {/* Gwalior Reference Landmarks Quick Snap Selector */}
-                    <div className="mb-5 bg-white border border-slate-200/60 p-4 rounded-2xl text-left shadow-2xs">
+                    <div className="mb-5 bg-white border border-slate-200/60 pt-[13px] pl-[5px] pr-[5px] pb-4 rounded-2xl text-left shadow-2xs w-[340.333px]">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
                           <Building className="w-4 h-4 text-amber-500" />
-                          <span>Gwalior Landmark References:</span>
+                          <span className="text-[11px]">Gwalior Landmark References:</span>
                         </span>
                         {GWALIOR_LANDMARKS.some(l => Math.abs(reportLat - l.latitude) < 0.001 && Math.abs(reportLng - l.longitude) < 0.001) && (
                           <span className="text-[9px] text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full font-bold animate-pulse">
@@ -3132,7 +4587,7 @@ export default function App() {
                       </div>
                       
                       {/* Horizontally scrolling pill capsules */}
-                      <div className="flex items-center space-x-2.5 overflow-x-auto pb-[5px] w-[300px] scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                      <div className="flex items-center space-x-2.5 overflow-x-auto pb-[5px] w-[330px] h-[57.8333px] pt-[5px] scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                         {GWALIOR_LANDMARKS.map(landmark => {
                           const isCurrentlySnapped = Math.abs(reportLat - landmark.latitude) < 0.001 && Math.abs(reportLng - landmark.longitude) < 0.001;
                           return (
@@ -3164,7 +4619,7 @@ export default function App() {
                     </div>
 
                     {/* Map Mode Selector Tabs */}
-                    <div className="flex items-center justify-between mb-3.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/50">
+                    <div className="flex items-center justify-between mb-3.5 bg-slate-100/80 p-1 pr-[13.25px] pl-[13.25px] rounded-xl border border-slate-200/50">
                       <span className="text-xs font-bold text-slate-600 ml-2.5">Mapping Engine:</span>
                       <div className="flex space-x-1">
                         <button
@@ -3399,7 +4854,7 @@ export default function App() {
                       className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-slate-100 disabled:text-slate-400 disabled:border disabled:border-slate-200/60 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl shadow-xs hover:shadow-sm cursor-pointer transition-all duration-300 flex items-center justify-center space-x-2 text-sm tracking-wide active:scale-[0.98]"
                     >
                       <Sparkles className={`w-4 h-4 ${(!reportTitle.trim() || !reportImage) ? 'text-slate-300' : 'text-amber-300 animate-pulse'}`} />
-                      <span>Dispatch to Multi-Agent AI Pipeline</span>
+                      <span className="text-[11.37px]">Submit Report to Multi-Agent AI Pipeline</span>
                     </button>
                   </div>
 
@@ -3440,8 +4895,19 @@ export default function App() {
                       <p className="text-[10px] text-slate-400 leading-relaxed mb-3">
                         Select a landmark to highlight its location on the map grid and check active nearby issues.
                       </p>
+
+                      <div className="relative mb-2">
+                        <input
+                          type="text"
+                          placeholder="Search landmark..."
+                          value={landmarkSearch}
+                          onChange={(e) => setLandmarkSearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                        />
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                      </div>
                       
-                      <div className="space-y-1.5 max-h-[340px] overflow-y-auto pr-1">
+                      <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
                         <button
                           onClick={() => setFocusedLandmarkId(null)}
                           className={`w-full text-left p-2 rounded-xl border text-[10px] font-bold transition flex items-center justify-between cursor-pointer ${
@@ -3456,14 +4922,19 @@ export default function App() {
                           </span>
                         </button>
 
-                        {GWALIOR_LANDMARKS.map(landmark => {
-                          const isFocused = focusedLandmarkId === landmark.id;
-                          
-                          // Count issues within ~0.015 coordinates range of this landmark (close proximity)
-                          const nearbyCount = issues.filter(iss => 
-                            Math.abs(iss.latitude - landmark.latitude) < 0.015 && 
-                            Math.abs(iss.longitude - landmark.longitude) < 0.015
-                          ).length;
+                        {GWALIOR_LANDMARKS
+                          .filter(l => 
+                            l.name.toLowerCase().includes(landmarkSearch.toLowerCase()) || 
+                            l.description.toLowerCase().includes(landmarkSearch.toLowerCase())
+                          )
+                          .map(landmark => {
+                            const isFocused = focusedLandmarkId === landmark.id;
+                            
+                            // Count issues within ~0.015 coordinates range of this landmark (close proximity)
+                            const nearbyCount = filteredMapIssues.filter(iss => 
+                              Math.abs(iss.latitude - landmark.latitude) < 0.015 && 
+                              Math.abs(iss.longitude - landmark.longitude) < 0.015
+                            ).length;
 
                           return (
                             <button
@@ -3508,7 +4979,7 @@ export default function App() {
                         {(() => {
                           const lm = GWALIOR_LANDMARKS.find(l => l.id === focusedLandmarkId);
                           if (!lm) return null;
-                          const nearby = issues.filter(iss => 
+                          const nearby = filteredMapIssues.filter(iss => 
                             Math.abs(iss.latitude - lm.latitude) < 0.015 && 
                             Math.abs(iss.longitude - lm.longitude) < 0.015
                           );
@@ -3582,7 +5053,7 @@ export default function App() {
                         </button>
                         {GWALIOR_LANDMARKS.map(landmark => {
                           const isFocused = focusedLandmarkId === landmark.id;
-                          const nearbyCount = issues.filter(iss => 
+                          const nearbyCount = filteredMapIssues.filter(iss => 
                             Math.abs(iss.latitude - landmark.latitude) < 0.015 && 
                             Math.abs(iss.longitude - landmark.longitude) < 0.015
                           ).length;
@@ -3613,6 +5084,93 @@ export default function App() {
                             </button>
                           );
                         })}
+                      </div>
+                    </div>
+
+                    {/* Interactive Issue Filters Panel */}
+                    <div className="bg-slate-50 border border-slate-150 p-4 rounded-2xl space-y-3">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                        <div className="flex items-center space-x-2">
+                          <Filter className="w-4 h-4 text-blue-600" />
+                          <span className="text-xs font-bold text-slate-700">Filter Incidents on Map:</span>
+                        </div>
+                        {/* Status Count badge */}
+                        <div className="flex items-center space-x-1.5 self-start sm:self-auto">
+                          <span className="text-[10px] font-bold px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full">
+                            Showing {filteredMapIssues.length} of {issues.length} Incidents
+                          </span>
+                          {(mapCategoryFilter !== 'all' || mapSeverityFilter !== 'all' || mapStatusFilter !== 'all' || mapSearchQuery !== '') && (
+                            <button
+                              onClick={() => {
+                                setMapCategoryFilter('all');
+                                setMapSeverityFilter('all');
+                                setMapStatusFilter('all');
+                                setMapSearchQuery('');
+                              }}
+                              className="text-[10px] text-red-600 hover:text-red-700 font-extrabold cursor-pointer transition"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Filter Controls Row */}
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                        {/* Search Input */}
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Search title, details, ward..."
+                            value={mapSearchQuery}
+                            onChange={(e) => setMapSearchQuery(e.target.value)}
+                            className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                          />
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                        </div>
+
+                        {/* Category Dropdown */}
+                        <div>
+                          <select
+                            value={mapCategoryFilter}
+                            onChange={(e) => setMapCategoryFilter(e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium text-slate-700 cursor-pointer"
+                          >
+                            <option value="all">All Categories</option>
+                            {Object.entries(CATEGORIES).map(([key, config]) => (
+                              <option key={key} value={key}>{config.label}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Severity Dropdown */}
+                        <div>
+                          <select
+                            value={mapSeverityFilter}
+                            onChange={(e) => setMapSeverityFilter(e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium text-slate-700 cursor-pointer"
+                          >
+                            <option value="all">All Severities</option>
+                            <option value="critical">🔴 Critical</option>
+                            <option value="high">🟠 High</option>
+                            <option value="medium">🟡 Medium</option>
+                            <option value="low">🔵 Low</option>
+                          </select>
+                        </div>
+
+                        {/* Status Dropdown */}
+                        <div>
+                          <select
+                            value={mapStatusFilter}
+                            onChange={(e) => setMapStatusFilter(e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium text-slate-700 cursor-pointer"
+                          >
+                            <option value="all">All Statuses</option>
+                            {Object.entries(STATUS_CONFIG).map(([key, config]) => (
+                              <option key={key} value={key}>{config.label}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
 
@@ -3666,7 +5224,7 @@ export default function App() {
                             })}
 
                             {/* Active Incidents Overlay */}
-                            {issues.map(iss => {
+                            {filteredMapIssues.map(iss => {
                               const isSelected = selectedIssue?.id === iss.id;
                               const catConfig = CATEGORIES[iss.category];
                               return (
@@ -3690,7 +5248,7 @@ export default function App() {
                         {/* Float overlay showing Selected Issue inside Google Map */}
                         {selectedIssue && (
                           <div className="absolute bottom-4 left-4 right-4 bg-white/95 backdrop-blur-md border border-slate-200 p-4 rounded-2xl shadow-xl flex items-center justify-between space-x-4 max-w-lg mx-auto z-10">
-                            <div className="text-left space-y-1 min-w-0">
+                            <div className="text-left space-y-1 min-w-0 flex-1">
                               <div className="flex items-center space-x-2">
                                 <span className="font-extrabold text-xs text-slate-800 truncate block">{selectedIssue.title}</span>
                                 <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-md ${selectedIssue.severity === 'critical' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
@@ -3699,14 +5257,26 @@ export default function App() {
                               </div>
                               <p className="text-[10px] text-slate-500 line-clamp-1">{selectedIssue.description}</p>
                             </div>
-                            <button
-                              onClick={() => {
-                                setActiveTab('feed');
-                              }}
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold uppercase px-3 py-2 rounded-lg shrink-0 transition"
-                            >
-                              View Details
-                            </button>
+                            <div className="flex items-center space-x-2 shrink-0">
+                              <button
+                                onClick={() => {
+                                  setActiveTab('feed');
+                                }}
+                                className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition cursor-pointer"
+                              >
+                                View Details
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedIssue(null);
+                                }}
+                                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-full transition cursor-pointer"
+                                title="Dismiss details"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -3759,14 +5329,10 @@ export default function App() {
                             <span className="text-[10px] uppercase font-bold tracking-widest text-purple-500/60 font-display">City Center & Morar (Thatipur) Sector</span>
                           </div>
 
-                          {/* Hotspots glows */}
-                          <div className="absolute top-1/3 left-1/4 w-32 h-32 bg-red-500/10 rounded-full filter blur-3xl pointer-events-none" />
-                          <div className="absolute bottom-1/4 right-1/3 w-40 h-40 bg-orange-500/10 rounded-full filter blur-3xl pointer-events-none" />
-
                           {/* Gwalior Reference Landmarks pins */}
                           {GWALIOR_LANDMARKS.map(landmark => {
                             const pctX = (landmark.longitude - MAP_BOUNDS.lngMin) / (MAP_BOUNDS.lngMax - MAP_BOUNDS.lngMin);
-                            const pctY = (MAP_BOUNDS.latMax - landmark.latitude) / (MAP_BOUNDS.latMax - landmark.latitude);
+                            const pctY = (MAP_BOUNDS.latMax - landmark.latitude) / (MAP_BOUNDS.latMax - MAP_BOUNDS.latMin);
 
                             const isFocused = focusedLandmarkId === landmark.id;
                             
@@ -3809,7 +5375,7 @@ export default function App() {
                           })}
 
                           {/* Pins mapping with full detailed click overlay popups */}
-                          {issues.map(iss => {
+                          {filteredMapIssues.map(iss => {
                             const pctX = (iss.longitude - MAP_BOUNDS.lngMin) / (MAP_BOUNDS.lngMax - MAP_BOUNDS.lngMin);
                             const pctY = (MAP_BOUNDS.latMax - iss.latitude) / (MAP_BOUNDS.latMax - MAP_BOUNDS.latMin);
                             
@@ -3841,6 +5407,43 @@ export default function App() {
                               </div>
                             );
                           })}
+
+                          {/* Selected issue float overlay inside Concept GIS Map */}
+                          {selectedIssue && (
+                            <div className="absolute bottom-4 left-4 right-4 bg-slate-900/95 backdrop-blur-md border border-slate-800 p-4 rounded-2xl shadow-2xl flex items-center justify-between space-x-4 max-w-lg mx-auto z-40">
+                              <div className="text-left space-y-1 min-w-0 flex-1">
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-extrabold text-xs text-white truncate block">{selectedIssue.title}</span>
+                                  <span className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-md ${
+                                    selectedIssue.severity === 'critical' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                  }`}>
+                                    {selectedIssue.severity}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 line-clamp-1">{selectedIssue.description}</p>
+                              </div>
+                              <div className="flex items-center space-x-2 shrink-0">
+                                <button
+                                  onClick={() => {
+                                    setActiveTab('feed');
+                                  }}
+                                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-[10px] font-black uppercase px-3 py-2 rounded-lg transition cursor-pointer"
+                                >
+                                  View Details
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedIssue(null);
+                                  }}
+                                  className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-full transition cursor-pointer"
+                                  title="Dismiss details"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -3866,602 +5469,833 @@ export default function App() {
             )}
 
             {/* View 5: Impact Stats Dashboard */}
-            {activeTab === 'dashboard' && stats && (
-              <motion.div 
-                key="dashboard-view"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                className="space-y-6 pb-20 md:pb-6"
-              >
-                {/* Advanced Interactive Filters Section */}
-                <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-3xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl border border-blue-100">
-                      <Filter className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider font-display">Analytics Command Center</h3>
-                      <p className="text-[10px] text-slate-400">Interactive filters covering wards & historical periods</p>
-                    </div>
-                  </div>
+            {activeTab === 'dashboard' && stats && (() => {
+              // Scoped calculations
+              const totalIncidents = issues.length;
+              const resolvedIncidents = issues.filter(i => i.status === 'resolved');
+              const openIncidents = issues.filter(i => i.status !== 'resolved');
+              
+              // Filtered issues
+              const filteredList = issues.filter(iss => {
+                const matchesWard = impactWardFilter === 'all' || iss.ward === impactWardFilter;
+                const matchesCat = impactCategoryFilter === 'all' || iss.category === impactCategoryFilter;
+                const matchesSev = impactSeverityFilter === 'all' || iss.severity === impactSeverityFilter;
+                return matchesWard && matchesCat && matchesSev;
+              });
 
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                    {/* Ward Selector */}
-                    <div className="flex items-center space-x-1.5 w-full sm:w-auto">
-                      <span className="text-[10px] font-extrabold text-slate-400 uppercase shrink-0">Ward:</span>
-                      <select
-                        value={analyticsWard}
-                        onChange={(e) => setAnalyticsWard(e.target.value)}
-                        className="bg-slate-50 border border-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700 cursor-pointer w-full sm:w-auto"
-                      >
-                        <option value="all">All Wards</option>
-                        <option value="Lashkar Zone (Maharaj Bada)">Lashkar Zone (Maharaj Bada)</option>
-                        <option value="Morar Zone (Thatipur)">Morar Zone (Thatipur)</option>
-                        <option value="City Center Gwalior">City Center Gwalior</option>
-                        <option value="Fort & Old Town Area">Fort & Old Town Area</option>
-                        <option value="DD Nagar & Pinto Park">DD Nagar & Pinto Park</option>
-                      </select>
-                    </div>
+              const fTotal = filteredList.length;
+              const fResolved = filteredList.filter(i => i.status === 'resolved').length;
+              const fOpen = fTotal - fResolved;
+              const fRate = fTotal > 0 ? Math.round((fResolved / fTotal) * 100) : 0;
 
-                    {/* Time Selector */}
-                    <div className="flex items-center space-x-1.5 w-full sm:w-auto">
-                      <span className="text-[10px] font-extrabold text-slate-400 uppercase shrink-0">Period:</span>
-                      <select
-                        value={analyticsTime}
-                        onChange={(e) => setAnalyticsTime(e.target.value)}
-                        className="bg-slate-50 border border-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700 cursor-pointer w-full sm:w-auto"
-                      >
-                        <option value="all">All-Time History</option>
-                        <option value="30days">Last 30 Days</option>
-                        <option value="7days">Last 7 Days</option>
-                        <option value="24hrs">Last 24 Hours</option>
-                      </select>
-                    </div>
+              // Calculate average resolution time in hours
+              let avgResHours = 14.5;
+              const resolvedWithTimestamps = filteredList.filter(i => i.status === 'resolved' && i.createdAt && i.updatedAt);
+              if (resolvedWithTimestamps.length > 0) {
+                const totalHours = resolvedWithTimestamps.reduce((sum, i) => {
+                  const c = new Date(i.createdAt).getTime();
+                  const u = new Date(i.updatedAt).getTime();
+                  const diff = (u - c) / (1000 * 60 * 60);
+                  return sum + Math.max(0.5, diff);
+                }, 0);
+                avgResHours = Math.round((totalHours / resolvedWithTimestamps.length) * 10) / 10;
+              }
 
-                    {/* Reset Button */}
-                    {(analyticsWard !== 'all' || analyticsTime !== 'all') && (
-                      <button
-                        onClick={() => {
-                          setAnalyticsWard('all');
-                          setAnalyticsTime('all');
-                        }}
-                        className="flex items-center justify-center space-x-1 text-slate-500 hover:text-red-500 text-xs font-bold bg-slate-100 hover:bg-red-50 border border-slate-200 rounded-lg px-2.5 py-1.5 transition cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Clear</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
+              // Total points allocated
+              const totalCitizenPoints = leaderboard.reduce((sum, u) => sum + (u.points || 0), 0);
+              const totalCivicUpvotes = filteredList.reduce((sum, i) => sum + (i.confirmations || 0), 0);
+              const distinctReporters = new Set(filteredList.map(i => i.reporterId)).size;
 
-                {/* 4 Stats Metrics Cards - Dynamically calculated */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                  {/* Card 1: Total Tracked Issues */}
-                  <div className="bg-white border-y border-r border-l-4 border-slate-200 border-l-blue-500 rounded-2xl p-3.5 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all duration-200 flex items-center justify-between">
-                    <div className="space-y-1">
-                      <span className="text-slate-500 text-[10px] font-extrabold uppercase tracking-wider block">Tracked Issues</span>
-                      <h3 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">{dynamicAnalyticsStats.totalReported}</h3>
-                      <p className="text-[9px] sm:text-[10px] text-slate-400 leading-none flex items-center space-x-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                        <span className="truncate max-w-[80px] sm:max-w-none">Active Gwalior log</span>
-                      </p>
-                    </div>
-                    <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl border border-blue-100 hidden sm:block shrink-0">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                  </div>
+              // Category Breakdown Chart Data
+              const categoryChartData = Object.entries(
+                filteredList.reduce((acc, i) => {
+                  acc[i.category] = (acc[i.category] || 0) + 1;
+                  return acc;
+                }, {} as Record<string, number>)
+              ).map(([cat, count]) => {
+                const resolved = filteredList.filter(iss => iss.category === cat && iss.status === 'resolved').length;
+                const countNum = count as number;
+                return {
+                  category: cat.replace('_', ' ').toUpperCase(),
+                  'Total Reported': countNum,
+                  'Resolved Cases': resolved,
+                  'Active Backlog': countNum - resolved
+                };
+              });
 
-                  {/* Card 2: Resolution Compliance */}
-                  <div className="bg-white border-y border-r border-l-4 border-slate-200 border-l-emerald-500 rounded-2xl p-3.5 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all duration-200 flex items-center justify-between">
-                    <div className="space-y-1">
-                      <span className="text-slate-500 text-[10px] font-extrabold uppercase tracking-wider block">Compliance</span>
-                      <h3 className="text-2xl sm:text-3xl font-black text-emerald-600 tracking-tight">{dynamicAnalyticsStats.resolutionRate}%</h3>
-                      <p className="text-[9px] sm:text-[10px] text-slate-400 leading-none flex items-center space-x-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        <span className="truncate max-w-[80px] sm:max-w-none">{dynamicAnalyticsStats.totalResolved} closed</span>
-                      </p>
-                    </div>
-                    <div className="bg-emerald-50 text-emerald-600 p-2.5 rounded-xl border border-emerald-100 hidden sm:block shrink-0">
-                      <CheckCircle className="w-5 h-5" />
-                    </div>
-                  </div>
+              // Status distribution for PieChart
+              const statusDistribution = Object.entries(
+                filteredList.reduce((acc, i) => {
+                  const sLabel = i.status === 'in_progress' ? 'IN PROGRESS' : i.status.toUpperCase();
+                  acc[sLabel] = (acc[sLabel] || 0) + 1;
+                  return acc;
+                }, {} as Record<string, number>)
+              ).map(([name, value]) => ({ name, value }));
 
-                  {/* Card 3: Average Resolution SLA */}
-                  <div className="bg-white border-y border-r border-l-4 border-slate-200 border-l-indigo-500 rounded-2xl p-3.5 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all duration-200 flex items-center justify-between">
-                    <div className="space-y-1">
-                      <span className="text-slate-500 text-[10px] font-extrabold uppercase tracking-wider block">Avg SLA Speed</span>
-                      <h3 className="text-2xl sm:text-3xl font-black text-indigo-600 tracking-tight">{dynamicAnalyticsStats.averageResolutionHours}h</h3>
-                      <p className="text-[9px] sm:text-[10px] text-slate-400 leading-none flex items-center space-x-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                        <span className="truncate max-w-[80px] sm:max-w-none">Fast-track route</span>
-                      </p>
-                    </div>
-                    <div className="bg-indigo-50 text-indigo-600 p-2.5 rounded-xl border border-indigo-100 hidden sm:block shrink-0">
-                      <Clock className="w-5 h-5" />
-                    </div>
-                  </div>
+              const STATUS_COLOR_MAP: Record<string, string> = {
+                'RESOLVED': '#10b981',
+                'IN PROGRESS': '#f59e0b',
+                'ACKNOWLEDGED': '#3b82f6',
+                'VERIFIED': '#6366f1',
+                'REPORTED': '#64748b'
+              };
 
-                  {/* Card 4: Citizen Engagement Index */}
-                  <div className="bg-white border-y border-r border-l-4 border-slate-200 border-l-orange-500 rounded-2xl p-3.5 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all duration-200 flex items-center justify-between">
-                    <div className="space-y-1">
-                      <span className="text-slate-500 text-[10px] font-extrabold uppercase tracking-wider block">Engagement</span>
-                      <h3 className="text-2xl sm:text-3xl font-black text-orange-500 tracking-tight">{dynamicAnalyticsStats.activeCitizens}</h3>
-                      <p className="text-[9px] sm:text-[10px] text-slate-400 leading-none flex items-center space-x-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
-                        <span className="truncate max-w-[80px] sm:max-w-none">Co-reviews log</span>
-                      </p>
-                    </div>
-                    <div className="bg-orange-50 text-orange-600 p-2.5 rounded-xl border border-orange-100 hidden sm:block shrink-0">
-                      <Trophy className="w-5 h-5" />
-                    </div>
-                  </div>
-                </div>
+              // Ward heat analysis
+              const wardMetrics = Object.entries(
+                filteredList.reduce((acc, i) => {
+                  const w = i.ward || 'General Zone';
+                  if (!acc[w]) acc[w] = { total: 0, resolved: 0, critical: 0 };
+                  acc[w].total++;
+                  if (i.status === 'resolved') acc[w].resolved++;
+                  if (i.severity === 'critical' || i.severity === 'high') acc[w].critical++;
+                  return acc;
+                }, {} as Record<string, { total: number; resolved: number; critical: number }>)
+              ).map(([name, data]) => {
+                const d = data as { total: number; resolved: number; critical: number };
+                return {
+                  name,
+                  total: d.total,
+                  resolved: d.resolved,
+                  critical: d.critical,
+                  rate: d.total > 0 ? Math.round((d.resolved / d.total) * 105) : 0
+                };
+              }).map(w => ({
+                ...w,
+                rate: Math.min(100, w.rate)
+              })).sort((a, b) => b.total - a.total);
 
-                {/* Dashboard visualization Charts Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  
-                  {/* Category bar chart */}
-                  <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between h-[280px] sm:h-[360px] hover:shadow-xs hover:border-slate-300/80 transition duration-200">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Active Hazards Distribution</h4>
-                        <span className="text-[9px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-bold">Dynamic Categories</span>
+              // Timeline trends for area chart
+              const dayMap: Record<string, { reported: number; resolved: number }> = {};
+              filteredList.forEach(i => {
+                try {
+                  const dLabel = new Date(i.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  if (!dayMap[dLabel]) dayMap[dLabel] = { reported: 0, resolved: 0 };
+                  dayMap[dLabel].reported++;
+                  if (i.status === 'resolved') dayMap[dLabel].resolved++;
+                } catch (e) {}
+              });
+
+              const timelineData = Object.entries(dayMap).map(([date, data]) => ({
+                date,
+                'Reports': data.reported,
+                'Resolved': data.resolved
+              })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(-7);
+
+              const triggerReportGeneration = () => {
+                setIsGeneratingReport(true);
+                setGeneratedReport(null);
+                
+                const stages = [
+                  "Syncing census metrics from Gwalior Ward Registers...",
+                  "Calculating zonal resolution speeds...",
+                  "Aggregating category-level bottleneck coefficients...",
+                  "Structuring municipal briefing docket..."
+                ];
+
+                let currentStage = 0;
+                
+                const interval = setInterval(() => {
+                  if (currentStage < stages.length) {
+                    setGeneratedReport({ stage: stages[currentStage] });
+                    currentStage++;
+                  } else {
+                    clearInterval(interval);
+                    
+                    // Generate smart insights
+                    const activeCriticalCount = filteredList.filter(i => i.status !== 'resolved' && (i.severity === 'critical' || i.severity === 'high')).length;
+
+                    let dominantProblem = "garbage disposal";
+                    let maxCount = 0;
+                    filteredList.reduce((acc, i) => {
+                      acc[i.category] = (acc[i.category] || 0) + 1;
+                      if (acc[i.category] > maxCount) {
+                        maxCount = acc[i.category];
+                        dominantProblem = i.category.replace('_', ' ');
+                      }
+                      return acc;
+                    }, {} as Record<string, number>);
+
+                    const recommendations = [
+                      `Zonal priority: Immediately deploy localized repair crews to ${wardMetrics[0]?.name || 'the primary zone'} which reports the highest civic load with ${wardMetrics[0]?.total || 0} registered incidents.`,
+                      dominantProblem ? `Resource dispatch: Reallocate 15% of the general civic maintenance budget to address ${dominantProblem.toUpperCase()} issues, currently comprising the majority category bottleneck.` : null,
+                      activeCriticalCount > 0 ? `Safety intervention: Mobilize urgent overnight response squads for ${activeCriticalCount} high/critical priority safety cases currently unresolved.` : "No outstanding critical incident backlogs exist, maintaining general municipal upkeep protocols."
+                    ].filter(Boolean);
+
+                    setGeneratedReport({
+                      completed: true,
+                      timestamp: new Date().toLocaleDateString('en-IN', { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true }),
+                      docketNumber: `GMC-IMPACT-${Math.floor(100000 + Math.random() * 900000)}`,
+                      summary: `Executive appraisal confirms Gwalior municipal resolution velocity is operating at ${fRate}% efficiency with an average case closure duration of ${avgResHours} hours. Zonal analysis flags ${wardMetrics[0]?.name || 'the primary ward'} as the primary hub of reporter engagement. Water/Sanitation represents the primary infrastructure load factor.`,
+                      recommendations
+                    });
+                    setIsGeneratingReport(false);
+                  }
+                }, 800);
+              };
+
+              const triggerSquadAlert = (wardName: string, count: number) => {
+                const toastMsg = `[Dispatch Directive] Live alert dispatched to ${wardName} Municipal Inspector Team! 🚀 Mobilizing immediate repair squads to clear ${count} active issues.`;
+                
+                const newNotif: ToastNotification = {
+                  id: `notif_${Date.now()}`,
+                  issueId: '',
+                  issueTitle: `Emergency Patrol Dispatch: ${wardName}`,
+                  newStatus: 'in_progress',
+                  type: 'general',
+                  message: `Executive commissioner has triggered priority sweep for ${wardName}. Ground personnel have been notified.`,
+                  timestamp: new Date().toISOString()
+                };
+
+                const savedToasts = localStorage.getItem('civicpulse_toasts');
+                try {
+                  const curToasts = savedToasts ? JSON.parse(savedToasts) : [];
+                  localStorage.setItem('civicpulse_toasts', JSON.stringify([newNotif, ...curToasts]));
+                  window.dispatchEvent(new Event('civicpulse_notifications_updated'));
+                } catch(e){}
+
+                alert(toastMsg);
+              };
+
+              return (
+                <motion.div 
+                  key="dashboard-view"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  className="space-y-6 pb-20 md:pb-6"
+                >
+                  {/* Top Metric Header */}
+                  <div className="bg-indigo-955 bg-indigo-950 text-white rounded-3xl p-6 relative overflow-hidden shadow-md">
+                    <div className="absolute right-0 top-0 opacity-10 pointer-events-none transform translate-x-12 -translate-y-8">
+                      <TrendingUp className="w-96 h-96" />
+                    </div>
+                    <div className="relative z-10 space-y-3 text-left">
+                      <div className="inline-flex items-center space-x-2 bg-indigo-900/60 px-3.5 py-1.5 rounded-full border border-indigo-700/30">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-300 animate-pulse" />
+                        <span className="text-[10px] font-black tracking-wider uppercase text-indigo-200">Gwalior Municipal Impact Analytics</span>
                       </div>
-                      <span className="text-[10px] text-slate-400">Comparing frequency of reported civic issues in selected scope</span>
+                      <h3 className="text-2xl font-black font-sans tracking-tight text-white">Gwalior Civic Impact & Analytics Dashboard</h3>
+                      <p className="text-indigo-200/90 text-xs max-w-3xl leading-relaxed">
+                        High-fidelity research portal evaluating municipal resolution compliance, citizen co-governance coefficients, and zonal backlog health.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Filter Command Bar */}
+                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4 shadow-3xs">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="p-2 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-600">
+                        <Filter className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider text-left">Research Filters</h4>
+                        <p className="text-[10px] text-slate-400 text-left">Drill down across wards, categories, and severity tiers</p>
+                      </div>
                     </div>
 
-                    <div className="flex-1 w-full pt-4 min-h-0">
-                      {categoryChartData.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs">
-                          <Info className="w-5 h-5 mb-1 text-slate-300" />
-                          No issues recorded in this selection.
+                    <div className="grid grid-cols-2 md:grid-cols-4 xl:flex items-center gap-2.5">
+                      {/* Ward Selector */}
+                      <div className="flex flex-col space-y-1 text-left">
+                        <span className="text-[9px] font-black uppercase text-slate-400">Ward Zone</span>
+                        <select
+                          value={impactWardFilter}
+                          onChange={(e) => setImpactWardFilter(e.target.value)}
+                          className="bg-white border border-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 cursor-pointer min-h-[34px]"
+                        >
+                          <option value="all">All Wards ({issues.length})</option>
+                          {Array.from(new Set(issues.map(i => i.ward))).filter(Boolean).map(w => (
+                            <option key={w} value={w}>{w} ({issues.filter(i => i.ward === w).length})</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Category Selector */}
+                      <div className="flex flex-col space-y-1 text-left">
+                        <span className="text-[9px] font-black uppercase text-slate-400">Category Type</span>
+                        <select
+                          value={impactCategoryFilter}
+                          onChange={(e) => setImpactCategoryFilter(e.target.value)}
+                          className="bg-white border border-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 cursor-pointer min-h-[34px]"
+                        >
+                          <option value="all">All Categories ({issues.length})</option>
+                          <option value="pothole">Pothole ({issues.filter(i => i.category === 'pothole').length})</option>
+                          <option value="water_leakage">Water Leakage ({issues.filter(i => i.category === 'water_leakage').length})</option>
+                          <option value="streetlight">Streetlight ({issues.filter(i => i.category === 'streetlight').length})</option>
+                          <option value="garbage">Garbage & Sanitation ({issues.filter(i => i.category === 'garbage').length})</option>
+                          <option value="road_damage">Road Damage ({issues.filter(i => i.category === 'road_damage').length})</option>
+                          <option value="other">Other ({issues.filter(i => i.category === 'other').length})</option>
+                        </select>
+                      </div>
+
+                      {/* Severity Selector */}
+                      <div className="flex flex-col space-y-1 text-left">
+                        <span className="text-[9px] font-black uppercase text-slate-400">Incident Severity</span>
+                        <select
+                          value={impactSeverityFilter}
+                          onChange={(e) => setImpactSeverityFilter(e.target.value)}
+                          className="bg-white border border-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 cursor-pointer min-h-[34px]"
+                        >
+                          <option value="all">All Severities</option>
+                          <option value="critical">🚨 Critical ({issues.filter(i => i.severity === 'critical').length})</option>
+                          <option value="high">🟠 High ({issues.filter(i => i.severity === 'high').length})</option>
+                          <option value="medium">🟡 Medium ({issues.filter(i => i.severity === 'medium').length})</option>
+                          <option value="low">🔵 Low ({issues.filter(i => i.severity === 'low').length})</option>
+                        </select>
+                      </div>
+
+                      {/* Customizable Column Toggle */}
+                      <div className="flex flex-col space-y-1 text-left">
+                        <span className="text-[9px] font-black uppercase text-slate-400">Card Density</span>
+                        <div className="flex items-center space-x-1 bg-white border border-slate-200 p-0.5 rounded-lg min-h-[34px]">
+                          <button
+                            type="button"
+                            onClick={() => setImpactDashboardMobileCols(1)}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer transition ${impactDashboardMobileCols === 1 ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            title="Set 1 column density on mobile"
+                          >
+                            1 Col
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setImpactDashboardMobileCols(2)}
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer transition ${impactDashboardMobileCols === 2 ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            title="Set 2 column density on mobile"
+                          >
+                            2 Col
+                          </button>
                         </div>
-                      ) : (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={categoryChartData}>
-                            <XAxis dataKey="name" stroke="#94a3b8" fontSize={9} tickLine={false} />
-                            <YAxis stroke="#94a3b8" fontSize={9} tickLine={false} />
-                            <Tooltip cursor={{ fill: 'rgba(0, 0, 0, 0.01)' }} />
-                            <Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]}>
-                              {categoryChartData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
+                      </div>
+
+                      {/* Reset Filters */}
+                      {(impactWardFilter !== 'all' || impactCategoryFilter !== 'all' || impactSeverityFilter !== 'all') && (
+                        <button
+                          onClick={() => {
+                            setImpactWardFilter('all');
+                            setImpactCategoryFilter('all');
+                            setImpactSeverityFilter('all');
+                          }}
+                          className="xl:mt-4 min-h-[34px] px-3 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Reset</span>
+                        </button>
                       )}
                     </div>
                   </div>
 
-                  {/* Ward Performance rankings */}
-                  <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col h-[280px] sm:h-[360px] hover:shadow-xs hover:border-slate-300/80 transition duration-200">
-                    <div className="mb-3">
-                      <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Ward Efficiency Matrix</h4>
-                      <span className="text-[10px] text-slate-400">Compliance and resolution speed rankings across Gwalior zones</span>
+                  {/* Bento KPI Grid */}
+                  <div className={`grid gap-4 ${impactDashboardMobileCols === 1 ? 'grid-cols-1' : 'grid-cols-2'} md:grid-cols-4`}>
+                    {/* KPI 1: Resolution Efficiency */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 flex flex-col justify-between hover:shadow-xs transition duration-200 group relative overflow-hidden text-left">
+                      <div className="absolute right-0 top-0 w-24 h-24 bg-emerald-500/5 rounded-full transform translate-x-4 -translate-y-4 group-hover:scale-110 transition-transform duration-300" />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Resolution Efficiency</span>
+                        <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
+                          <CheckCircle className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-1.5 text-left">
+                        <h4 className="text-2xl md:text-3xl font-extrabold text-slate-900 font-display tracking-tight">
+                          {fRate}%
+                        </h4>
+                        <p className="text-[10px] text-slate-500 font-medium">
+                          <strong>{fResolved}</strong> of {fTotal} logged cases cleared
+                        </p>
+                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2">
+                          <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${fRate}%` }} />
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-                      {stats.wardLeaderboard.map((ward: any) => {
-                        // Dynamically scale counts if filters are applied to show visual coordination
-                        const isFilteredWard = analyticsWard !== 'all' && ward.wardName !== analyticsWard;
-                        const opacityStyle = isFilteredWard ? 'opacity-40 border-dashed bg-slate-50/50' : '';
-                        
-                        return (
-                          <div key={ward.wardName} className={`p-2.5 rounded-xl border border-slate-100 bg-slate-50/25 space-y-1.5 text-xs transition-all duration-200 ${opacityStyle}`}>
-                            <div className="flex justify-between items-center text-slate-700">
-                              <span className="font-bold flex items-center space-x-1.5">
-                                <span className={`w-2 h-2 rounded-full ${isFilteredWard ? 'bg-slate-300' : 'bg-blue-500'}`} />
-                                <span className="truncate max-w-[160px]">{ward.wardName}</span>
-                              </span>
-                              <span className="font-mono text-[9px] text-slate-500">SLA: {ward.avgResolutionDays}d avg</span>
-                            </div>
-                            
-                            {/* Progress bar */}
-                            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden relative">
-                              <div 
-                                className={`h-full bg-gradient-to-r ${isFilteredWard ? 'from-slate-300 to-slate-400' : 'from-blue-500 to-indigo-600'} rounded-full`}
-                                style={{ width: `${(ward.resolvedCount / ward.reportedCount) * 100}%` }}
-                              />
-                            </div>
+                    {/* KPI 2: Avg Case Resolution Lifecycle */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 flex flex-col justify-between hover:shadow-xs transition duration-200 group relative overflow-hidden text-left">
+                      <div className="absolute right-0 top-0 w-24 h-24 bg-blue-500/5 rounded-full transform translate-x-4 -translate-y-4 group-hover:scale-110 transition-transform duration-300" />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Avg Resolution Velocity</span>
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-1.5 text-left">
+                        <h4 className="text-2xl md:text-3xl font-extrabold text-slate-900 font-display tracking-tight">
+                          {avgResHours} hrs
+                        </h4>
+                        <p className="text-[10px] text-slate-500 font-medium">
+                          From initial intake to mechanical closure
+                        </p>
+                        <span className="inline-flex items-center text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md mt-1">
+                          <TrendingUp className="w-3 h-3 mr-1" />
+                          -1.4 hours vs baseline
+                        </span>
+                      </div>
+                    </div>
 
-                            <div className="flex justify-between text-[9px] text-slate-400">
-                              <span>{ward.reportedCount} reported | {ward.resolvedCount} closed</span>
-                              <span className={`font-extrabold ${isFilteredWard ? 'text-slate-400' : 'text-slate-600'}`}>
-                                {Math.round((ward.resolvedCount / ward.reportedCount) * 100)}% compliance
+                    {/* KPI 3: Open Case Strain Backlog */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 flex flex-col justify-between hover:shadow-xs transition duration-200 group relative overflow-hidden text-left">
+                      <div className="absolute right-0 top-0 w-24 h-24 bg-amber-500/5 rounded-full transform translate-x-4 -translate-y-4 group-hover:scale-110 transition-transform duration-300" />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active Backlog load</span>
+                        <div className="p-2 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
+                          <AlertTriangle className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-1.5 text-left">
+                        <h4 className="text-2xl md:text-3xl font-extrabold text-slate-900 font-display tracking-tight">
+                          {fOpen} issues
+                        </h4>
+                        <p className="text-[10px] text-slate-500 font-medium">
+                          Cases in triage or actively in-progress
+                        </p>
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {['reported', 'verified', 'acknowledged', 'in_progress'].map(status => {
+                            const c = filteredList.filter(i => i.status === status).length;
+                            if (c === 0) return null;
+                            return (
+                              <span key={status} className="text-[8px] font-bold bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 uppercase">
+                                {status.substring(0, 3)}: {c}
                               </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* KPI 4: Citizen Core Engagement Coefficient */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 flex flex-col justify-between hover:shadow-xs transition duration-200 group relative overflow-hidden text-left">
+                      <div className="absolute right-0 top-0 w-24 h-24 bg-indigo-500/5 rounded-full transform translate-x-4 -translate-y-4 group-hover:scale-110 transition-transform duration-300" />
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Civic Co-Governance</span>
+                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
+                          <Award className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-1.5 text-left">
+                        <h4 className="text-2xl md:text-3xl font-extrabold text-slate-900 font-display tracking-tight">
+                          {totalCivicUpvotes} Upvotes
+                        </h4>
+                        <p className="text-[10px] text-slate-500 font-medium">
+                          By <strong>{distinctReporters}</strong> active neighborhood leaders
+                        </p>
+                        <span className="inline-flex items-center text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md mt-1">
+                          {totalCitizenPoints} Points Disbursed
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Main Charts Row */}
+                  {fTotal === 0 ? (
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-16 text-center space-y-3">
+                      <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto" />
+                      <h4 className="font-bold text-slate-800 text-sm">No Incidents Discovered</h4>
+                      <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                        No incident reports match your active filter combinations. Try selecting "All Wards" or "All Categories" to view metrics.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                        {/* Left Column: Trend Area Chart */}
+                        <div className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-4 md:p-5 space-y-4 text-left">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div>
+                              <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">Municipal Case Timeline Velocity</h4>
+                              <p className="text-[10px] text-slate-400">Historical trend showing incoming report velocity versus resolution rate</p>
+                            </div>
+                            <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100 uppercase font-mono">7-Day Sweep</span>
+                          </div>
+                          
+                          <div className="h-[250px] md:h-[280px] w-full text-xs font-mono">
+                            {timelineData.length === 0 ? (
+                              <div className="h-full flex items-center justify-center text-slate-450">Insufficient historical scatter data</div>
+                            ) : (
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={timelineData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                                  <defs>
+                                    <linearGradient id="colorReported" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
+                                      <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
+                                    </linearGradient>
+                                    <linearGradient id="colorResolved" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                    </linearGradient>
+                                  </defs>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                  <XAxis dataKey="date" tickLine={false} axisLine={false} dy={5} stroke="#94a3b8" />
+                                  <YAxis tickLine={false} axisLine={false} stroke="#94a3b8" />
+                                  <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }} />
+                                  <Legend verticalAlign="top" height={36} iconType="circle" />
+                                  <Area type="monotone" dataKey="Reports" stroke="#4f46e5" fillOpacity={1} fill="url(#colorReported)" strokeWidth={2} />
+                                  <Area type="monotone" dataKey="Resolved" stroke="#10b981" fillOpacity={1} fill="url(#colorResolved)" strokeWidth={2} />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Right Column: Status Pie Chart */}
+                        <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-4 md:p-5 flex flex-col justify-between text-left">
+                          <div className="border-b border-slate-100 pb-3">
+                            <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">Docket Status Allocation</h4>
+                            <p className="text-[10px] text-slate-400">Backlog composition breakdown</p>
+                          </div>
+                          
+                          <div className="h-[200px] w-full flex items-center justify-center relative my-3">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={statusDistribution}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={50}
+                                  outerRadius={75}
+                                  paddingAngle={3}
+                                  dataKey="value"
+                                >
+                                  {statusDistribution.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={STATUS_COLOR_MAP[entry.name] || '#cbd5e1'} />
+                                  ))}
+                                </Pie>
+                                <Tooltip />
+                              </PieChart>
+                            </ResponsiveContainer>
+                            <div className="absolute flex flex-col items-center justify-center pointer-events-none">
+                              <span className="text-2xl font-black text-slate-800 tracking-tight">{fOpen}</span>
+                              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Active Open</span>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
 
-                </div>
-
-                {/* Mobile View Navigation Segmented Control for secondary charts */}
-                <div className="lg:hidden bg-slate-100 border border-slate-200/80 p-1 rounded-xl flex items-center shadow-3xs">
-                  <button
-                    onClick={() => setMobileChartTab('trends')}
-                    className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-all duration-200 cursor-pointer ${
-                      mobileChartTab === 'trends' 
-                        ? 'bg-slate-900 text-white shadow-xs' 
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    Timeline Trends
-                  </button>
-                  <button
-                    onClick={() => setMobileChartTab('sla')}
-                    className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-all duration-200 cursor-pointer ${
-                      mobileChartTab === 'sla' 
-                        ? 'bg-slate-900 text-white shadow-xs' 
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    SLA Speeds
-                  </button>
-                  <button
-                    onClick={() => setMobileChartTab('severity')}
-                    className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-all duration-200 cursor-pointer ${
-                      mobileChartTab === 'severity' 
-                        ? 'bg-slate-900 text-white shadow-xs' 
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    Severity Load
-                  </button>
-                </div>
-
-                {/* Additional Visualizations Grid: Trend Area Chart & SLA comparison Bar Chart & Severity Composition */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-                  {/* Trend Area Chart */}
-                  <div className={`lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between h-[280px] sm:h-[320px] transition-all duration-300 ${mobileChartTab === 'trends' ? 'flex' : 'hidden lg:flex'}`}>
-                    <div>
-                      <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Report & Resolution Trends</h4>
-                      <span className="text-[10px] text-slate-400">Timeline view tracking civic reports and closures</span>
-                    </div>
-
-                    <div className="flex-1 w-full pt-4 min-h-0">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={historicalTrendData}>
-                          <XAxis dataKey="date" stroke="#94a3b8" fontSize={9} tickLine={false} />
-                          <YAxis stroke="#94a3b8" fontSize={9} tickLine={false} />
-                          <Tooltip />
-                          <Legend iconSize={8} wrapperStyle={{ fontSize: 9 }} />
-                          <Area type="monotone" dataKey="Reported" stroke="#3B82F6" fillOpacity={0.1} fill="#3B82F6" strokeWidth={2} />
-                          <Area type="monotone" dataKey="Resolved" stroke="#10B981" fillOpacity={0.06} fill="#10B981" strokeWidth={2} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* Resolution Target vs SLA Bar Comparison */}
-                  <div className={`lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between h-[280px] sm:h-[320px] transition-all duration-300 ${mobileChartTab === 'sla' ? 'flex' : 'hidden lg:flex'}`}>
-                    <div>
-                      <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">SLA Target vs Actual Resolution Speed</h4>
-                      <span className="text-[10px] text-slate-400">Lower actual hours (indigo) than target (slate) indicates high efficiency</span>
-                    </div>
-
-                    <div className="flex-1 w-full pt-4 min-h-0">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={slaChartData}>
-                          <XAxis dataKey="category" stroke="#94a3b8" fontSize={8} tickLine={false} />
-                          <YAxis stroke="#94a3b8" fontSize={9} label={{ value: 'Hours', angle: -90, position: 'insideLeft', style: { fontSize: 8, fill: '#64748b' } }} tickLine={false} />
-                          <Tooltip />
-                          <Legend iconSize={8} wrapperStyle={{ fontSize: 9 }} />
-                          <Bar dataKey="Actual" fill="#6366F1" radius={[2, 2, 0, 0]} barSize={12} />
-                          <Bar dataKey="Target" fill="#CBD5E1" radius={[2, 2, 0, 0]} barSize={12} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* Severity Composition Pie Chart */}
-                  <div className={`lg:col-span-3 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between h-[280px] sm:h-[320px] transition-all duration-300 ${mobileChartTab === 'severity' ? 'flex' : 'hidden lg:flex'}`}>
-                    <div>
-                      <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Severity Breakdown</h4>
-                      <span className="text-[10px] text-slate-400">Proportional load of high-threat concerns</span>
-                    </div>
-
-                    <div className="flex-1 relative min-h-0 py-2">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={severityChartData}
-                            cx="50%"
-                            cy="45%"
-                            innerRadius={35}
-                            outerRadius={55}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {severityChartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
+                          <div className="grid grid-cols-2 gap-1.5 text-left text-[10px] font-semibold mt-1 bg-slate-50 p-2.5 rounded-xl border border-slate-150">
+                            {statusDistribution.map((item) => (
+                              <div key={item.name} className="flex items-center space-x-1.5 py-0.5">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLOR_MAP[item.name] || '#cbd5e1' }} />
+                                <span className="text-slate-600 truncate max-w-[80px]">{item.name}</span>
+                                <span className="font-extrabold text-slate-900 ml-auto">{item.value}</span>
+                              </div>
                             ))}
-                          </Pie>
-                          <Tooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
-
-                      {/* Customized legend below */}
-                      <div className="absolute bottom-0 left-0 right-0 grid grid-cols-2 gap-1 text-[8px] font-bold uppercase text-slate-500 text-center">
-                        {severityChartData.map((item) => (
-                          <div key={item.name} className="flex items-center justify-center space-x-1">
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
-                            <span>{item.name} ({item.value})</span>
                           </div>
-                        ))}
+                        </div>
                       </div>
-                    </div>
-                  </div>
 
-                </div>
-
-                {/* Departmental Accountability Scorecard */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-2xs space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div className="flex items-center space-x-2">
-                      <Building className="w-4 h-4 text-indigo-600 animate-pulse" />
-                      <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider font-display">Municipal Agency Scorecard</h4>
-                    </div>
-                    <span className="text-[9px] bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full font-bold">Live Status Check</span>
-                  </div>
-
-                  {/* Desktop View: Clean Table */}
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-left text-xs text-slate-600 border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase text-[9px]">
-                          <th className="py-2.5">Agency / Department</th>
-                          <th className="py-2.5">Responsible Scope</th>
-                          <th className="py-2.5">Total Assigned</th>
-                          <th className="py-2.5">SLA Compliance Rate</th>
-                          <th className="py-2.5 text-right">Performance Grade</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        <tr>
-                          <td className="py-3 font-bold text-slate-800">Gwalior Nagar Nigam (Municipal Waste Corp)</td>
-                          <td className="py-3">Garbage, litter, municipal hygiene</td>
-                          <td className="py-3">54 incidents</td>
-                          <td className="py-3 text-emerald-600 font-bold">96% compliant</td>
-                          <td className="py-3 text-right">
-                            <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-sm">GRADE A+</span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="py-3 font-bold text-slate-800">Madhya Pradesh Kshetra Vidyut Vitran</td>
-                          <td className="py-3">Streetlights, faulty wires, solar poles</td>
-                          <td className="py-3">38 incidents</td>
-                          <td className="py-3 text-emerald-600 font-bold">91% compliant</td>
-                          <td className="py-3 text-right">
-                            <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-sm">GRADE A</span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="py-3 font-bold text-slate-800">Gwalior Municipal Water Resources Board</td>
-                          <td className="py-3">Main pipe leakages, sewage blockades</td>
-                          <td className="py-3">43 incidents</td>
-                          <td className="py-3 text-amber-600 font-bold">84% compliant</td>
-                          <td className="py-3 text-right">
-                            <span className="bg-amber-50 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded-sm">GRADE B+</span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="py-3 font-bold text-slate-800">Public Works Department (PWD Gwalior)</td>
-                          <td className="py-3">Potholes, cave-ins, road damage</td>
-                          <td className="py-3">29 incidents</td>
-                          <td className="py-3 text-red-600 font-bold">76% compliant</td>
-                          <td className="py-3 text-right">
-                            <span className="bg-red-50 text-red-700 text-[10px] font-black px-2 py-0.5 rounded-sm">GRADE C</span>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Mobile View: Stack of elegant Cards */}
-                  <div className="block md:hidden space-y-3">
-                    {[
-                      {
-                        name: "Gwalior Nagar Nigam (Municipal Waste Corp)",
-                        scope: "Garbage, litter, municipal hygiene",
-                        incidents: "54 incidents",
-                        compliance: "96%",
-                        grade: "GRADE A+",
-                        gradeColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
-                        barColor: "bg-emerald-500"
-                      },
-                      {
-                        name: "Madhya Pradesh Kshetra Vidyut Vitran",
-                        scope: "Streetlights, faulty wires, solar poles",
-                        incidents: "38 incidents",
-                        compliance: "91%",
-                        grade: "GRADE A",
-                        gradeColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
-                        barColor: "bg-emerald-500"
-                      },
-                      {
-                        name: "Gwalior Municipal Water Resources Board",
-                        scope: "Main pipe leakages, sewage blockades",
-                        incidents: "43 incidents",
-                        compliance: "84%",
-                        grade: "GRADE B+",
-                        gradeColor: "bg-amber-50 text-amber-700 border-amber-200",
-                        barColor: "bg-amber-500"
-                      },
-                      {
-                        name: "Public Works Department (PWD Gwalior)",
-                        scope: "Potholes, cave-ins, road damage",
-                        incidents: "29 incidents",
-                        compliance: "76%",
-                        grade: "GRADE C",
-                        gradeColor: "bg-red-50 text-red-700 border-red-200",
-                        barColor: "bg-red-500"
-                      }
-                    ].map((dept, index) => (
-                      <div key={index} className="bg-slate-50/50 border border-slate-100 rounded-xl p-3.5 space-y-3 shadow-3xs">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h5 className="font-extrabold text-xs text-slate-800 leading-snug">{dept.name}</h5>
-                            <p className="text-[10px] text-slate-400 mt-0.5">{dept.scope}</p>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-black tracking-wide border shrink-0 uppercase ${dept.gradeColor}`}>
-                            {dept.grade}
-                          </span>
+                      {/* Bar chart - Departmental Loads */}
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 space-y-4 text-left">
+                        <div className="border-b border-slate-100 pb-3">
+                          <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">Departmental Backlog load analysis</h4>
+                          <p className="text-[10px] text-slate-400">Direct volume comparison of reported, resolved, and active incidents categorized by municipal department</p>
                         </div>
                         
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-[10px] text-slate-500">
-                            <span>Assigned: <strong className="text-slate-700 font-bold">{dept.incidents}</strong></span>
-                            <span>Compliance: <strong className="text-slate-700 font-bold">{dept.compliance}</strong></span>
-                          </div>
-                          <div className="h-1.5 w-full bg-slate-200/80 rounded-full overflow-hidden">
-                            <div className={`h-full ${dept.barColor} rounded-full`} style={{ width: dept.compliance }} />
-                          </div>
+                        <div className="h-[250px] w-full text-xs font-mono">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={categoryChartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                              <XAxis dataKey="category" tickLine={false} axisLine={false} stroke="#94a3b8" />
+                              <YAxis tickLine={false} axisLine={false} stroke="#94a3b8" />
+                              <Tooltip />
+                              <Legend verticalAlign="top" height={36} iconType="circle" />
+                              <Bar dataKey="Total Reported" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                              <Bar dataKey="Resolved Cases" fill="#10b981" radius={[4, 4, 0, 0]} />
+                              <Bar dataKey="Active Backlog" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-                {/* AI Predictive Smart-City Sandbox Playground */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 md:p-6 text-white relative overflow-hidden shadow-sm">
-                  <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
-                  
-                  <div className="flex items-center space-x-2 border-b border-white/10 pb-4 mb-4">
-                    <Sparkles className="w-5 h-5 text-yellow-400 animate-pulse" />
-                    <div>
-                      <h4 className="font-extrabold text-xs uppercase text-yellow-400 tracking-wider font-display">AI Gwalior Load Simulator</h4>
-                      <p className="text-[10px] text-slate-300">Run simulations of environmental spikes or major events to forecast municipal pressure</p>
-                    </div>
-                  </div>
-
-                  {/* Settings grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-                    
-                    {/* Select Climate season */}
-                    <div className="md:col-span-4 space-y-1.5">
-                      <label className="text-[10px] font-bold uppercase text-slate-400 flex items-center space-x-1">
-                        <CloudRain className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Weather & Seasonal Cycle</span>
-                      </label>
-                      <select
-                        value={simSeason}
-                        onChange={(e) => setSimSeason(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 text-xs text-white rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 cursor-pointer"
-                      >
-                        <option value="monsoon">☔ Heavy Monsoon Rains (Water logging & pothole risk)</option>
-                        <option value="summer">☀️ Peak Indian Summer (Pipeline pressure leakages)</option>
-                        <option value="festival">🪔 Gwalior Mela & Festival Season (Garbage volume surge)</option>
-                        <option value="normal">⛅ Standard Gwalior Climate (Average Loads)</option>
-                      </select>
-                    </div>
-
-                    {/* Select Civic Crowd Intensity */}
-                    <div className="md:col-span-4 space-y-1.5">
-                      <label className="text-[10px] font-bold uppercase text-slate-400 flex items-center space-x-1">
-                        <Activity className="w-3.5 h-3.5 text-orange-400" />
-                        <span>Public Density Events</span>
-                      </label>
-                      <select
-                        value={simDensity}
-                        onChange={(e) => setSimDensity(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 text-xs text-white rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 cursor-pointer"
-                      >
-                        <option value="normal">🏙️ Standard City Mobility (Normal Footprint)</option>
-                        <option value="mela">🎪 Historical Gwalior Trade Fair (Massive Tourist Crowd)</option>
-                        <option value="convoy">🚘 VIP Convoy Corridor Sweep (High-safety patrol)</option>
-                      </select>
-                    </div>
-
-                    {/* Run Trigger Button */}
-                    <div className="md:col-span-4">
-                      <button
-                        onClick={handleRunSimulation}
-                        disabled={isSimulating}
-                        className="w-full bg-orange-500 hover:bg-orange-600 text-slate-950 font-black text-xs uppercase tracking-wider py-2.5 px-4 rounded-xl transition shadow-md hover:shadow-orange-500/10 active:scale-[0.98] flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
-                      >
-                        {isSimulating ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin text-slate-955" />
-                            <span>Computing Forecast...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Zap className="w-4 h-4 text-slate-955 fill-slate-955" />
-                            <span>Run Load Simulation</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                  </div>
-
-                  {/* Simulated Results Output */}
-                  <AnimatePresence>
-                    {simulationResult && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="mt-5 border-t border-white/10 pt-4 overflow-hidden"
-                      >
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-slate-300">
-                           
-                          {/* Left Column: Metrics */}
-                          <div className="bg-white/5 border border-white/5 rounded-xl p-3.5 space-y-2">
-                            <h5 className="text-[10px] text-yellow-400 font-extrabold uppercase tracking-wider">Forecasted Severity Risk</h5>
-                            <div className="flex items-baseline space-x-1">
-                              <span className="text-2xl font-black text-white">+{simulationResult.spikePercentage}%</span>
-                              <span className="text-[9px] text-slate-400">load surge expected</span>
-                            </div>
-                            <div className="text-[10px] space-y-1">
-                              <p className="flex justify-between">
-                                <span className="text-slate-400">Highest Threat Category:</span>
-                                <span className="font-bold text-white uppercase">{CATEGORIES[simulationResult.highestRiskCategory as IssueCategory]?.label || simulationResult.highestRiskCategory}</span>
-                              </p>
-                              <p className="flex justify-between">
-                                <span className="text-slate-400">High Risk Zone:</span>
-                                <span className="font-bold text-white">{simulationResult.highestRiskWard}</span>
-                              </p>
-                            </div>
+                      {/* Zonal Heatmap & Ward performance Index table */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 text-left">
+                        {/* Ward index */}
+                        <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-4 md:p-5 space-y-4 flex flex-col justify-between">
+                          <div className="text-left border-b border-slate-100 pb-3">
+                            <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">Gwalior Zonal resolution heatmap index</h4>
+                            <p className="text-[10px] text-slate-400">Evaluating ward resolution efficiency with automated dispatch pathways</p>
                           </div>
 
-                          {/* Center Column: Recommendations */}
-                          <div className="bg-white/5 border border-white/5 rounded-xl p-3.5 space-y-2 col-span-1 md:col-span-2">
-                            <h5 className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-wider">AI Predictive Preventive Directives</h5>
-                            <ul className="text-[11px] list-disc list-inside space-y-1 text-slate-200">
-                              {simulationResult.recommendations.map((rec: string, idx: number) => (
-                                <li key={idx} className="leading-relaxed">
-                                  {rec}
-                                </li>
-                              ))}
-                            </ul>
-                            <div className="h-px bg-white/5 my-2" />
-                            <p className="text-[10px] text-slate-400 italic">
-                              <strong>Nagar Nigam Orders:</strong> {simulationResult.preventiveOrders}
-                            </p>
-                          </div>
+                          <div className="overflow-hidden border border-slate-150 rounded-xl bg-white shadow-3xs">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50 text-slate-400 font-bold border-b border-slate-250 text-[9px] uppercase tracking-wider">
+                                    <th className="py-2.5 px-3 font-bold">Zone / Ward Name</th>
+                                    <th className="py-2.5 px-3 text-center font-bold">Total Cases</th>
+                                    <th className="py-2.5 px-3 text-center font-bold">Cleared</th>
+                                    <th className="py-2.5 px-3 text-center font-bold">Resolution Rate</th>
+                                    <th className="py-2.5 px-3 text-right font-bold">Action Directive</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {wardMetrics.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={5} className="py-8 text-center text-slate-400 font-medium font-mono uppercase tracking-wider">No Zone logs found</td>
+                                    </tr>
+                                  ) : (
+                                    wardMetrics.map((w) => {
+                                      let badgeBg = "bg-red-50 text-red-800 border-red-100";
+                                      if (w.rate >= 75) badgeBg = "bg-emerald-50 text-emerald-800 border-emerald-100";
+                                      else if (w.rate >= 50) badgeBg = "bg-amber-50 text-amber-800 border-amber-100";
+                                      
+                                      const unres = w.total - w.resolved;
 
+                                      return (
+                                        <tr key={w.name} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                                          <td className="py-3 px-3 font-bold text-slate-800 font-sans max-w-[150px] truncate" title={w.name}>
+                                            {w.name}
+                                          </td>
+                                          <td className="py-3 px-3 text-center text-slate-700 font-mono font-extrabold">{w.total}</td>
+                                          <td className="py-3 px-3 text-center text-emerald-600 font-mono font-extrabold">{w.resolved}</td>
+                                          <td className="py-3 px-3 text-center">
+                                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${badgeBg}`}>
+                                              {w.rate}%
+                                            </span>
+                                          </td>
+                                          <td className="py-3 px-3 text-right">
+                                            <button
+                                              onClick={() => triggerSquadAlert(w.name, unres)}
+                                              disabled={unres === 0}
+                                              className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition ${
+                                                unres === 0
+                                                  ? 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed'
+                                                  : 'bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border-indigo-100 hover:border-indigo-600 cursor-pointer font-extrabold'
+                                              }`}
+                                            >
+                                              {unres === 0 ? 'Optimal' : 'Dispatch Alert'}
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
 
-                  {!simulationResult && !isSimulating && (
-                    <div className="mt-4 flex items-center space-x-2 text-[10px] text-slate-400 bg-white/5 rounded-lg p-2.5">
-                      <Info className="w-4 h-4 text-yellow-400 shrink-0" />
-                      <span>Select weather and footfall configurations above to forecast risk surge, estimate high-threat zones, and generate dynamic pre-emptive action rosters.</span>
-                    </div>
+                        {/* Executive AI Brief Report */}
+                        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-4 md:p-5 flex flex-col justify-between text-left space-y-4">
+                          <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                            <div>
+                              <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider">AI Executive Appraisal Engine</h4>
+                              <p className="text-[10px] text-slate-400">Generate instantly verifiable municipal briefing dockets</p>
+                            </div>
+                            <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 flex-1 flex flex-col justify-center min-h-[220px]">
+                            {isGeneratingReport ? (
+                              <div className="text-center space-y-3.5 py-8">
+                                <span className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin inline-block"></span>
+                                <p className="text-[10px] font-bold text-indigo-800 uppercase tracking-widest font-mono animate-pulse">
+                                  {generatedReport?.stage || 'Preparing compiler...'}
+                                </p>
+                              </div>
+                            ) : generatedReport?.completed ? (
+                              <div className="space-y-3.5 text-left">
+                                <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+                                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Docket: {generatedReport.docketNumber}</span>
+                                  <span className="text-[9px] font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-bold uppercase">Ready</span>
+                                </div>
+
+                                <div className="space-y-1.5 text-left">
+                                  <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-800 font-bold">Operational Summary</h5>
+                                  <p className="text-[11px] text-slate-600 leading-relaxed font-medium bg-white p-2.5 rounded-xl border border-slate-150">
+                                    {generatedReport.summary}
+                                  </p>
+                                </div>
+
+                                <div className="space-y-2 text-left">
+                                  <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-800 font-bold">Directive Guidelines</h5>
+                                  <ul className="space-y-1.5">
+                                    {generatedReport.recommendations.map((rec: string, i: number) => (
+                                      <li key={i} className="text-[10px] text-slate-500 flex items-start space-x-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 mt-1.5" />
+                                        <span>{rec}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+
+                                <div className="flex items-center space-x-2 pt-2 border-t border-slate-150">
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(JSON.stringify(generatedReport, null, 2));
+                                      alert("Docket JSON copied successfully to clipboard!");
+                                    }}
+                                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition flex-1 cursor-pointer text-center font-bold"
+                                  >
+                                    Copy Docket
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      alert("Executive appraisal report downloaded successfully to Gwalior Municipal Corporation Secure Ledger!");
+                                    }}
+                                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-250 rounded-lg text-[10px] font-bold transition flex-1 cursor-pointer text-center font-bold"
+                                  >
+                                    Simulate CSV Export
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-center space-y-3 py-6">
+                                <FileText className="w-8 h-8 text-slate-300 mx-auto" />
+                                <h5 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Summary Generation Required</h5>
+                                <p className="text-[10px] text-slate-400 max-w-xs mx-auto">
+                                  Analyze current ward metrics, resolution rate bottlenecks, and user interaction volumes to formulate an executive strategic docket.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          {!generatedReport?.completed && !isGeneratingReport && (
+                            <button
+                              onClick={triggerReportGeneration}
+                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center space-x-2 cursor-pointer"
+                            >
+                              <Sparkles className="w-4 h-4 text-indigo-200" />
+                              <span>Execute Appraisal Compile</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </>
                   )}
 
-                </div>
+                  {/* AI Predictive Smart-City Sandbox Playground */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 md:p-6 text-white relative overflow-hidden shadow-sm">
+                    <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
+                    
+                    <div className="flex items-center space-x-2 border-b border-white/10 pb-4 mb-4 text-left">
+                      <Sparkles className="w-5 h-5 text-yellow-400 animate-pulse" />
+                      <div>
+                        <h4 className="font-extrabold text-xs uppercase text-yellow-400 tracking-wider font-display">Predictive Smart-City Simulation Sandbox</h4>
+                        <p className="text-[10px] text-slate-300">Run calculations of environmental spikes or crowd movements to estimate high-threat zones and municipal pressure.</p>
+                      </div>
+                    </div>
 
-              </motion.div>
-            )}
+                    {/* Settings grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end text-left">
+                      
+                      {/* Select Climate season */}
+                      <div className="md:col-span-4 space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase text-slate-400 flex items-center space-x-1">
+                          <CloudRain className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Weather & Seasonal Cycle</span>
+                        </label>
+                        <select
+                          value={simSeason}
+                          onChange={(e) => setSimSeason(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 text-xs text-white rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 cursor-pointer"
+                        >
+                          <option value="monsoon">☔ Heavy Monsoon Rains (Water logging & pothole risk)</option>
+                          <option value="summer">☀️ Peak Indian Summer (Pipeline pressure leakages)</option>
+                          <option value="festival">🪔 Gwalior Mela & Festival Season (Garbage volume surge)</option>
+                          <option value="normal">⛅ Standard Gwalior Climate (Average Loads)</option>
+                        </select>
+                      </div>
+
+                      {/* Select Civic Crowd Intensity */}
+                      <div className="md:col-span-4 space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase text-slate-400 flex items-center space-x-1">
+                          <Activity className="w-3.5 h-3.5 text-orange-400" />
+                          <span>Public Density Events</span>
+                        </label>
+                        <select
+                          value={simDensity}
+                          onChange={(e) => setSimDensity(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 text-xs text-white rounded-lg p-2.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 cursor-pointer"
+                        >
+                          <option value="normal">🏙️ Standard City Mobility (Normal Footprint)</option>
+                          <option value="mela">🎪 Historical Gwalior Trade Fair (Massive Tourist Crowd)</option>
+                          <option value="convoy">🚘 VIP Convoy Corridor Sweep (High-safety patrol)</option>
+                        </select>
+                      </div>
+
+                      {/* Run Trigger Button */}
+                      <div className="md:col-span-4">
+                        <button
+                          onClick={handleRunSimulation}
+                          disabled={isSimulating}
+                          className="w-full bg-orange-500 hover:bg-orange-600 text-slate-950 font-black text-xs uppercase tracking-wider py-2.5 px-4 rounded-xl transition shadow-md hover:shadow-orange-500/10 active:scale-[0.98] flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSimulating ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin text-slate-955" />
+                              <span>Computing Forecast...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="w-4 h-4 text-slate-955 fill-slate-955" />
+                              <span>Run Load Simulation</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                    </div>
+
+                    {/* Simulated Results Output */}
+                    <AnimatePresence>
+                      {simulationResult && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-5 border-t border-white/10 pt-4 overflow-hidden text-left"
+                        >
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-slate-300">
+                             
+                            {/* Left Column: Metrics */}
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3.5 space-y-2">
+                              <h5 className="text-[10px] text-yellow-400 font-extrabold uppercase tracking-wider">Forecasted Severity Risk</h5>
+                              <div className="flex items-baseline space-x-1">
+                                <span className="text-2xl font-black text-white">+{simulationResult.spikePercentage}%</span>
+                                <span className="text-[9px] text-slate-400">load surge expected</span>
+                              </div>
+                              <div className="text-[10px] space-y-1">
+                                <p className="flex justify-between">
+                                  <span className="text-slate-400">Highest Threat Category:</span>
+                                  <span className="font-bold text-white uppercase">{CATEGORIES[simulationResult.highestRiskCategory as IssueCategory]?.label || simulationResult.highestRiskCategory}</span>
+                                </p>
+                                <p className="flex justify-between">
+                                  <span className="text-slate-400">High Risk Zone:</span>
+                                  <span className="font-bold text-white">{simulationResult.highestRiskWard}</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Center Column: Recommendations */}
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3.5 space-y-2 col-span-1 md:col-span-2">
+                              <h5 className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-wider">AI Predictive Preventive Directives</h5>
+                              <ul className="text-[11px] list-disc list-inside space-y-1 text-slate-200">
+                                {simulationResult.recommendations.map((rec: string, idx: number) => (
+                                  <li key={idx} className="leading-relaxed">
+                                    {rec}
+                                  </li>
+                                ))}
+                              </ul>
+                              <div className="h-px bg-white/5 my-2" />
+                              <p className="text-[10px] text-slate-400 italic">
+                                <strong>Nagar Nigam Orders:</strong> {simulationResult.preventiveOrders}
+                              </p>
+                            </div>
+
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {!simulationResult && !isSimulating && (
+                      <div className="mt-4 flex items-center space-x-2 text-[10px] text-slate-400 bg-white/5 rounded-lg p-2.5 text-left">
+                        <Info className="w-4 h-4 text-yellow-400 shrink-0" />
+                        <span>Select weather and footfall configurations above to forecast risk surge, estimate high-threat zones, and generate dynamic pre-emptive action rosters.</span>
+                      </div>
+                    )}
+
+                  </div>
+                </motion.div>
+              );
+            })()}
 
             {/* View 6: Profile & Gamification */}
             {activeTab === 'profile' && currentUser && (
@@ -4476,14 +6310,26 @@ export default function App() {
                 {/* Left Profile Panel */}
                 <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between space-y-5">
                   <div className="space-y-4 text-center">
-                    <div className="relative w-24 h-24 mx-auto">
+                    <div 
+                      onClick={() => {
+                        setProfileEditName(currentUser.name);
+                        setProfileEditEmail(currentUser.email || '');
+                        setProfileEditPhone(currentUser.phone || '');
+                        setProfileEditAvatar(currentUser.avatar || '');
+                        setIsProfileEditModalOpen(true);
+                      }}
+                      className="relative w-24 h-24 mx-auto cursor-pointer group"
+                    >
                       <img 
                         src={currentUser.avatar} 
                         alt={currentUser.name} 
-                        className="w-full h-full rounded-full object-cover border-4 border-blue-500 shadow-md"
+                        className="w-full h-full rounded-full object-cover border-4 border-blue-500 shadow-md group-hover:opacity-85 transition duration-150"
                         referrerPolicy="no-referrer"
                       />
-                      <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-white p-1.5 rounded-full shadow-md">
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white rounded-full opacity-0 group-hover:opacity-100 transition duration-150">
+                        <Camera className="w-5 h-5 text-white" />
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 bg-yellow-500 text-white p-1.5 rounded-full shadow-md z-10">
                         <Award className="w-4 h-4" />
                       </div>
                     </div>
@@ -4491,14 +6337,49 @@ export default function App() {
                     <div className="space-y-1">
                       <h3 className="font-black text-slate-800 text-base">{currentUser.name}</h3>
                       <p className="text-xs text-slate-400">{currentUser.email || 'priyansh@civicpulse.org'}</p>
+                      {currentUser.phone && (
+                        <p className="text-[10px] text-slate-500 font-bold mt-0.5">{currentUser.phone}</p>
+                      )}
                       <div className="flex flex-wrap items-center justify-center gap-1 mt-2">
                         <span className="inline-block bg-blue-50 text-blue-700 text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-blue-100">
-                          {currentUser.role === 'citizen' ? 'Citizen Steward' : currentUser.role === 'admin' ? 'System Administrator' : 'Municipal Authority'}
+                          {currentUser.role === 'citizen'
+                            ? 'Citizen Steward'
+                            : currentUser.role === 'admin'
+                            ? 'System Administrator'
+                            : currentUser.accessLevel === 'level_3'
+                            ? 'Municipal Commissioner'
+                            : currentUser.accessLevel === 'level_2'
+                            ? 'Dept Head'
+                            : 'Field Inspector'}
                         </span>
                         <span className="inline-block bg-amber-50 text-amber-700 text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-amber-100">
                           Level {Math.floor(currentUser.points / 150) + 1}
                         </span>
                       </div>
+                      
+                      {/* Direct Edit Trigger */}
+                      <button
+                        onClick={() => {
+                          setProfileEditName(currentUser.name);
+                          setProfileEditEmail(currentUser.email || '');
+                          setProfileEditPhone(currentUser.phone || '');
+                          setProfileEditAvatar(currentUser.avatar || '');
+                          setIsProfileEditModalOpen(true);
+                        }}
+                        className="mt-3.5 w-full inline-flex items-center justify-center space-x-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-100 hover:border-blue-200 font-extrabold text-xs uppercase py-2.5 rounded-xl transition duration-200 cursor-pointer shadow-3xs min-h-[44px]"
+                      >
+                        <Settings className="w-3.5 h-3.5" />
+                        <span>Edit Profile</span>
+                      </button>
+
+                      {/* Log Out Button immediately after Edit Profile */}
+                      <button
+                        onClick={handleSignOut}
+                        className="mt-2 w-full inline-flex items-center justify-center space-x-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 hover:border-red-200 font-extrabold text-xs uppercase py-2.5 rounded-xl transition duration-200 cursor-pointer shadow-3xs min-h-[44px]"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Log Out</span>
+                      </button>
                     </div>
 
                     <div className="h-px bg-slate-100 my-3" />
@@ -4574,34 +6455,98 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Logout Button */}
-                  <div className="pt-2 border-t border-slate-100 mt-auto">
-                    <button
-                      onClick={handleSignOut}
-                      className="w-full flex items-center justify-center space-x-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 hover:border-red-300 font-extrabold text-xs uppercase tracking-wider py-2.5 rounded-xl transition duration-200 cursor-pointer shadow-2xs"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      <span>Log Out</span>
-                    </button>
-                  </div>
+
                 </div>
 
                 {/* Right Interactive Dashboard Panel */}
                 <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col space-y-5">
                   
-                  {/* Citizen Engagement Leaderboard Header */}
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  {/* Citizen Stewardship Header */}
+                  <div className="flex flex-col space-y-2 border-b border-slate-100 pb-3">
                     <div className="text-left">
                       <h3 className="font-black text-slate-800 text-lg uppercase tracking-tight flex items-center space-x-2">
                         <Trophy className="w-5 h-5 text-amber-500 animate-pulse" />
-                        <span>Citizen Engagement Leaderboard</span>
+                        <span>Citizen Stewardship Portal</span>
                       </h3>
-                      <p className="text-xs text-slate-400">Competitive ranking of active citizens in Gwalior based on reports, peer-verifications, and comments.</p>
+                      <p className="text-xs text-slate-400">Unlock municipal badges, track Gwalior leaderboard, redeem rewards, and manage your local profile details.</p>
                     </div>
                   </div>
 
+                  {/* Profile sub-tabs navigator - Horizontal Scrollable with generous touch targets */}
+                  <div className="flex items-center space-x-1 overflow-x-auto pb-1.5 scrollbar-none border-b border-slate-100">
+                    <button
+                      onClick={() => setProfileSubTab('leaderboard')}
+                      className={`flex items-center space-x-2 px-3 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer min-h-[44px] ${
+                        profileSubTab === 'leaderboard'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Trophy className="w-4 h-4" />
+                      <span>Leaderboard</span>
+                    </button>
+                    <button
+                      onClick={() => setProfileSubTab('rewards')}
+                      className={`flex items-center space-x-2 px-3 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer min-h-[44px] ${
+                        profileSubTab === 'rewards'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Gift className="w-4 h-4" />
+                      <span>Redeem Rewards</span>
+                    </button>
+                    <button
+                      onClick={() => setProfileSubTab('quests')}
+                      className={`flex items-center space-x-2 px-3 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer min-h-[44px] ${
+                        profileSubTab === 'quests'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Zap className="w-4 h-4" />
+                      <span>Daily Quests</span>
+                    </button>
+                    <button
+                      onClick={() => setProfileSubTab('contributions')}
+                      className={`flex items-center space-x-2 px-3 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer min-h-[44px] ${
+                        profileSubTab === 'contributions'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Layers className="w-4 h-4" />
+                      <span>Activity Log</span>
+                    </button>
+                    <button
+                      onClick={() => setProfileSubTab('settings')}
+                      className={`flex items-center space-x-2 px-3 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer min-h-[44px] ${
+                        profileSubTab === 'settings'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Settings className="w-4 h-4" />
+                      <span>Edit Profile</span>
+                    </button>
+                    {currentUser && (currentUser.role === 'authority' || currentUser.role === 'admin') && (
+                      <button
+                        type="button"
+                        onClick={() => setProfileSubTab('attendance')}
+                        className={`flex items-center space-x-2 px-3 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer min-h-[44px] ${
+                          profileSubTab === 'attendance'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'text-slate-500 hover:text-slate-800 hover:bg-emerald-50'
+                        }`}
+                      >
+                        <Clock className="w-4 h-4" />
+                        <span>Attendance Portal</span>
+                      </button>
+                    )}
+                  </div>
+
                   {/* Sub-tab: Civic Leaderboard in Gamification */}
-                  {(() => {
+                  {profileSubTab === 'leaderboard' && (() => {
                     const sortedLeaderboard = [...leaderboard]
                       .filter(u => u.role === 'citizen')
                       .sort((a, b) => b.points - a.points);
@@ -4770,19 +6715,25 @@ export default function App() {
                   })()}
 
                   {/* Sub-tab 2: Point Redemption Mall */}
-                  {false && (
-                    <div className="space-y-4">
+                  {profileSubTab === 'rewards' && (
+                    <div className="space-y-5 text-left">
                       <div>
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Rewards Redemption Center</h4>
-                          <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-0.5 font-bold">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h4 className="font-extrabold text-sm text-slate-700 uppercase tracking-wider">Rewards Redemption Center</h4>
+                          <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-3 py-1 font-black">
                             Balance: {currentUser.points} pts
                           </span>
                         </div>
-                        <p className="text-[10px] text-slate-400">Trade your community contribution points for real physical & travel vouchers authorized by Gwalior Municipal Corp.</p>
+                        <p className="text-xs text-slate-400 mt-1">Trade your community contribution points for physical & travel vouchers authorized by Gwalior Municipal Corp.</p>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {profileSuccessMsg && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl animate-bounce">
+                          {profileSuccessMsg}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                         {[
                           { id: 'bus_pass', title: 'Gwalior Smart Bus 5-Ride Pass', description: 'Enjoy free transit across Gwalior city routes.', cost: 100, icon: Layers },
                           { id: 'mela_vip', title: 'Gwalior Mela VIP Gatepass', description: 'VIP parking and entry voucher at Gwalior Trade Fair.', cost: 150, icon: MapPin },
@@ -4794,15 +6745,15 @@ export default function App() {
                           const RewardIcon = reward.icon;
 
                           return (
-                            <div key={reward.id} className="bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-xl p-3.5 flex justify-between items-start transition duration-200">
-                              <div className="flex items-start space-x-3">
-                                <div className="bg-blue-50 text-blue-600 p-2 rounded-lg border border-blue-100 shrink-0">
-                                  <RewardIcon className="w-4 h-4" />
+                            <div key={reward.id} className="bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-2xl p-4 flex justify-between items-start transition duration-200">
+                              <div className="flex items-start space-x-3 text-left">
+                                <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl border border-blue-100 shrink-0">
+                                  <RewardIcon className="w-5 h-5" />
                                 </div>
                                 <div className="space-y-0.5">
                                   <h5 className="font-black text-slate-800 text-xs tracking-tight">{reward.title}</h5>
                                   <p className="text-[10px] text-slate-500 leading-snug">{reward.description}</p>
-                                  <span className="inline-block text-[10px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md mt-1.5">
+                                  <span className="inline-block text-[10px] font-black text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-md mt-2">
                                     {reward.cost} points
                                   </span>
                                 </div>
@@ -4810,7 +6761,7 @@ export default function App() {
                               <button
                                 onClick={() => handleRedeemReward(reward)}
                                 disabled={!canAfford}
-                                className={`text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg transition shrink-0 ${canAfford ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                                className={`text-[10px] font-extrabold uppercase px-3 py-2 rounded-xl transition-all duration-155 shrink-0 min-h-[36px] ${canAfford ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer hover:shadow-sm' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
                               >
                                 {canAfford ? 'Redeem' : 'Locked'}
                               </button>
@@ -4818,18 +6769,71 @@ export default function App() {
                           );
                         })}
                       </div>
+
+                      {/* Redeemed History */}
+                      {redeemedRewards.length > 0 && (
+                        <div className="mt-6 pt-5 border-t border-slate-100">
+                          <h5 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider mb-3">Your Active Vouchers & Coupons</h5>
+                          <div className="space-y-2.5">
+                            {redeemedRewards.map((v) => (
+                              <div key={v.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                                <div className="text-left">
+                                  <p className="font-bold text-slate-800 text-xs">{v.title}</p>
+                                  <span className="text-[10px] text-slate-400">Claimed: {new Date(v.redeemedAt).toLocaleDateString()}</span>
+                                </div>
+                                <div className="bg-white border border-dashed border-slate-300 px-3 py-1.5 rounded-lg text-center select-all font-mono font-black text-blue-600 text-xs tracking-wider">
+                                  {v.code}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
                   {/* Sub-tab 3: Daily Quests and Challenges */}
-                  {false && (
-                    <div className="space-y-4">
+                  {profileSubTab === 'quests' && (
+                    <div className="space-y-4 text-left">
                       <div>
-                        <h4 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Active Daily Challenges</h4>
-                        <p className="text-[10px] text-slate-400">Complete neighborhood check-ins to gain multiplier bonuses and point rewards.</p>
+                        <h4 className="font-extrabold text-sm text-slate-700 uppercase tracking-wider">Active Daily Challenges</h4>
+                        <p className="text-xs text-slate-400 mt-1">Complete neighborhood check-ins to gain multiplier bonuses and point rewards.</p>
                       </div>
 
-                      <div className="space-y-3">
+                      <div className="space-y-3.5">
+                        {/* Interactive Daily Check-in Card */}
+                        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                          <div className="flex items-start space-x-3.5">
+                            <div className="bg-emerald-100/80 text-emerald-700 p-2.5 rounded-xl border border-emerald-200/50 shrink-0">
+                              <CheckCircle className="w-5 h-5 text-emerald-600 animate-pulse" />
+                            </div>
+                            <div className="space-y-1 text-left">
+                              <h5 className="font-extrabold text-xs text-slate-800 uppercase tracking-tight flex items-center space-x-1.5">
+                                <span>Daily Attendance Check-in</span>
+                                <span className="bg-emerald-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider">Daily Bonus</span>
+                              </h5>
+                              <p className="text-xs text-slate-600 leading-relaxed">
+                                Claim your daily citizen check-in points to verify you are patrolling or monitoring Gwalior's streets.
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-medium font-mono">
+                                Resets every 24 hours • Reward: +10 pts
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleDailyCheckIn}
+                            disabled={checkedInToday}
+                            className={`text-xs font-extrabold uppercase px-4 py-2.5 rounded-xl transition-all duration-200 shrink-0 shadow-xs min-h-[44px] ${
+                              checkedInToday
+                                ? 'bg-emerald-100 text-emerald-600 cursor-not-allowed border border-emerald-200/50'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer hover:shadow-sm'
+                            }`}
+                          >
+                            {checkedInToday ? 'Checked In Today (+10 pts)' : 'Check In Now'}
+                          </button>
+                        </div>
+
                         {/* Quest 1 */}
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                           <div className="flex items-start space-x-3.5">
@@ -4852,14 +6856,15 @@ export default function App() {
                             </div>
                           </div>
                           {currentUser.reportedCount > 0 ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg flex items-center space-x-1 whitespace-nowrap">
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg flex items-center space-x-1 whitespace-nowrap min-h-[36px]">
                               <Check className="w-3.5 h-3.5" />
                               <span>Completed</span>
                             </span>
                           ) : (
                             <button
+                              type="button"
                               onClick={() => setActiveTab('report')}
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg transition"
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg transition min-h-[36px]"
                             >
                               Report Now
                             </button>
@@ -4888,14 +6893,15 @@ export default function App() {
                             </div>
                           </div>
                           {(currentUser.verifiedCount || 0) >= 2 ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg flex items-center space-x-1 whitespace-nowrap">
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg flex items-center space-x-1 whitespace-nowrap min-h-[36px]">
                               <Check className="w-3.5 h-3.5" />
                               <span>Completed</span>
                             </span>
                           ) : (
                             <button
+                              type="button"
                               onClick={() => setActiveTab('feed')}
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg transition"
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg transition min-h-[36px]"
                             >
                               Explore Tickets
                             </button>
@@ -4924,14 +6930,15 @@ export default function App() {
                             </div>
                           </div>
                           {userActivities.some(act => act.voiceNoteUrl) ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg flex items-center space-x-1 whitespace-nowrap">
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg flex items-center space-x-1 whitespace-nowrap min-h-[36px]">
                               <Check className="w-3.5 h-3.5" />
                               <span>Completed</span>
                             </span>
                           ) : (
                             <button
+                              type="button"
                               onClick={() => setActiveTab('report')}
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg transition"
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-extrabold uppercase px-2.5 py-1.5 rounded-lg transition min-h-[36px]"
                             >
                               Advocate Now
                             </button>
@@ -4942,15 +6949,15 @@ export default function App() {
                   )}
 
                   {/* Sub-tab 4: My Activity Feed */}
-                  {false && (
-                    <div className="space-y-4">
+                  {profileSubTab === 'contributions' && (
+                    <div className="space-y-4 text-left">
                       <div>
-                        <h4 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Your Contribution & Coordination Log</h4>
-                        <p className="text-[10px] text-slate-400">Chronological history of your reported and co-signed neighborhood hazard tickets.</p>
+                        <h4 className="font-extrabold text-sm text-slate-700 uppercase tracking-wider">Your Contribution & Coordination Log</h4>
+                        <p className="text-xs text-slate-400 mt-1">Chronological history of your reported and co-signed neighborhood hazard tickets.</p>
                       </div>
 
                       {userActivities.length === 0 ? (
-                        <div className="text-center py-12 text-slate-400 text-xs">
+                        <div className="text-center py-12 text-slate-400 text-xs bg-slate-50 border border-dashed rounded-2xl">
                           No registered interactions. Visit the Map Feed to sign petitions or submit a new case file.
                         </div>
                       ) : (
@@ -4958,7 +6965,7 @@ export default function App() {
                           {userActivities.map((issue) => {
                             const isReporter = issue.reporterId === currentUser.uid;
                             return (
-                              <div key={issue.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                              <div key={issue.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
                                 <div className="space-y-1 text-left">
                                   <div className="flex items-center space-x-2">
                                     <span className="font-black text-slate-800 truncate max-w-[200px]">{issue.title}</span>
@@ -4974,15 +6981,16 @@ export default function App() {
                                 </div>
 
                                 <div className="flex items-center space-x-2 self-end md:self-auto">
-                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${issue.status === 'resolved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : issue.status === 'in_progress' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-slate-100 text-slate-600'}`}>
+                                  <span className={`text-[9px] font-bold px-2.5 py-1 rounded-md uppercase ${issue.status === 'resolved' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : issue.status === 'in_progress' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-slate-100 text-slate-600'}`}>
                                     {issue.status}
                                   </span>
                                   <button
+                                    type="button"
                                     onClick={() => {
                                       setSelectedIssue(issue);
                                       setActiveTab('feed');
                                     }}
-                                    className="text-[10px] font-extrabold uppercase bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-2.5 py-1.5 rounded-lg transition"
+                                    className="text-[10px] font-extrabold uppercase bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 px-2.5 py-1.5 rounded-lg transition min-h-[32px] cursor-pointer"
                                   >
                                     Inspect Case
                                   </button>
@@ -4996,14 +7004,72 @@ export default function App() {
                   )}
 
                   {/* Sub-tab 5: Profile Settings & Notification Preferences */}
-                  {false && (
+                  {profileSubTab === 'settings' && (
                     <form onSubmit={handleSaveProfileSettings} className="space-y-4 text-left">
                       <div>
-                        <h4 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Citizen Stewardship Settings</h4>
-                        <p className="text-[10px] text-slate-400">Configure your personal information and Gwalior local alert channel preferences.</p>
+                        <h4 className="font-extrabold text-sm text-slate-700 uppercase tracking-wider">Citizen Stewardship Settings</h4>
+                        <p className="text-xs text-slate-400 mt-1">Configure your personal information and Gwalior local alert channel preferences.</p>
                       </div>
 
+                      {profileSuccessMsg && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl animate-bounce">
+                          {profileSuccessMsg}
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Profile Photo Settings with Upload Option */}
+                        <div className="md:col-span-2 space-y-2 border-b border-slate-100 pb-4">
+                          <label className="text-[10px] font-black uppercase text-slate-500 block">Steward Profile Photo</label>
+                          <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4">
+                            <img 
+                              src={profileEditAvatar || currentUser?.avatar} 
+                              alt="Avatar preview" 
+                              className="w-16 h-16 rounded-2xl object-cover border-2 border-slate-200 shadow-xs"
+                            />
+                            <div className="flex-1 space-y-2 w-full text-left">
+                              <div className="flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0">
+                                <select
+                                  value={profileEditAvatar}
+                                  onChange={(e) => setProfileEditAvatar(e.target.value)}
+                                  className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none text-slate-700 cursor-pointer font-bold flex-1 min-h-[44px]"
+                                >
+                                  <option value="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80">Male Portrait (Priyansh)</option>
+                                  <option value="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80">Female Portrait (Ananya)</option>
+                                  <option value="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80">Male Portrait (Kabir)</option>
+                                  <option value="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80">Silhouette Placeholder</option>
+                                  {profileEditAvatar && !profileEditAvatar.startsWith('https://images.unsplash.com') && (
+                                    <option value={profileEditAvatar}>Custom Uploaded Photo</option>
+                                  )}
+                                </select>
+                                
+                                <label className="cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 hover:border-blue-300 font-extrabold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center space-x-1 flex-1 min-h-[44px]">
+                                  <Upload className="w-4 h-4" />
+                                  <span>Upload from Gallery</span>
+                                  <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => {
+                                          if (typeof reader.result === 'string') {
+                                            setProfileEditAvatar(reader.result);
+                                          }
+                                        };
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                              <p className="text-[10px] text-slate-400">Choose a default preset avatar or upload your own photo from your device's gallery.</p>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* Name Input */}
                         <div className="space-y-1">
                           <label className="text-[10px] font-black uppercase text-slate-500 block">Steward Display Name</label>
@@ -5011,8 +7077,20 @@ export default function App() {
                             type="text"
                             value={profileEditName}
                             onChange={(e) => setProfileEditName(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800 min-h-[44px]"
                             placeholder="Display name"
+                          />
+                        </div>
+
+                        {/* Email Input */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-slate-500 block">Email ID</label>
+                          <input 
+                            type="email"
+                            value={profileEditEmail}
+                            onChange={(e) => setProfileEditEmail(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800 min-h-[44px]"
+                            placeholder="Email address"
                           />
                         </div>
 
@@ -5023,18 +7101,18 @@ export default function App() {
                             type="text"
                             value={profileEditPhone}
                             onChange={(e) => setProfileEditPhone(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800 min-h-[44px]"
                             placeholder="+91 94251 12345"
                           />
                         </div>
 
                         {/* Preferred Ward Zone */}
-                        <div className="space-y-1 md:col-span-2">
+                        <div className="space-y-1">
                           <label className="text-[10px] font-black uppercase text-slate-500 block">Primary Zone of Responsibility</label>
                           <select 
                             value={profileEditWard}
                             onChange={(e) => setProfileEditWard(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-700"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-700 min-h-[44px]"
                           >
                             <option value="Lashkar Zone (Maharaj Bada)">Lashkar Zone (Maharaj Bada)</option>
                             <option value="Morar Zone (Thatipur)">Morar Zone (Thatipur)</option>
@@ -5043,49 +7121,80 @@ export default function App() {
                             <option value="DD Nagar & Pinto Park">DD Nagar & Pinto Park</option>
                           </select>
                         </div>
+
+                        {/* If authority or admin, show department and level selects */}
+                        {(currentUser?.role === 'authority' || currentUser?.role === 'admin') && (
+                          <>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-black uppercase text-slate-500 block">Assigned Nagar Nigam Department</label>
+                              <select 
+                                value={profileEditDepartment}
+                                onChange={(e) => setProfileEditDepartment(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-700 min-h-[44px]"
+                              >
+                                {Object.entries(DEPARTMENTS).map(([key, val]) => (
+                                  <option key={key} value={key}>{val.icon} {val.label} ({val.hindiLabel})</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-black uppercase text-slate-500 block">Authority Officer Level</label>
+                              <select 
+                                value={profileEditAuthorityLevel}
+                                onChange={(e) => setProfileEditAuthorityLevel(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-700 min-h-[44px]"
+                              >
+                                {Object.entries(AUTHORITY_LEVELS).map(([key, val]) => (
+                                  <option key={key} value={key}>{val.badge} {val.label} ({val.hindiLabel})</option>
+                                ))}
+                              </select>
+                            </div>
+                          </>
+                        )}
                       </div>
 
                       {/* Notification Toggles */}
                       <div className="space-y-3 pt-2">
                         <label className="text-[10px] font-black uppercase text-slate-500 block">Civic Alert Notifications</label>
                         
-                        <div className="space-y-2">
-                          <label className="flex items-center space-x-3 cursor-pointer">
+                        <div className="space-y-3">
+                          <label className="flex items-start space-x-3 cursor-pointer min-h-[44px]">
                             <input 
                               type="checkbox" 
                               checked={profileNotificationSMS}
                               onChange={(e) => setProfileNotificationSMS(e.target.checked)}
-                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4" 
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 mt-0.5" 
                             />
                             <div className="text-left">
                               <span className="text-xs font-bold text-slate-700 block">SMS Alerts</span>
-                              <span className="text-[9px] text-slate-400">Instant SMS upon local hazard routing or state status updates.</span>
+                              <span className="text-[9px] text-slate-400 block mt-0.5">Instant SMS upon local hazard routing or state status updates.</span>
                             </div>
                           </label>
 
-                          <label className="flex items-center space-x-3 cursor-pointer">
+                          <label className="flex items-start space-x-3 cursor-pointer min-h-[44px]">
                             <input 
                               type="checkbox" 
                               checked={profileNotificationWhatsApp}
                               onChange={(e) => setProfileNotificationWhatsApp(e.target.checked)}
-                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4" 
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 mt-0.5" 
                             />
                             <div className="text-left">
                               <span className="text-xs font-bold text-slate-700 block">WhatsApp Broadcasts</span>
-                              <span className="text-[9px] text-slate-400">Weekly summaries of ward resolution rates and leaderboards.</span>
+                              <span className="text-[9px] text-slate-400 block mt-0.5">Weekly summaries of ward resolution rates and leaderboards.</span>
                             </div>
                           </label>
 
-                          <label className="flex items-center space-x-3 cursor-pointer">
+                          <label className="flex items-start space-x-3 cursor-pointer min-h-[44px]">
                             <input 
                               type="checkbox" 
                               checked={profileNotificationEmail}
                               onChange={(e) => setProfileNotificationEmail(e.target.checked)}
-                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4" 
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 mt-0.5" 
                             />
                             <div className="text-left">
                               <span className="text-xs font-bold text-slate-700 block">Official Email Dispatch</span>
-                              <span className="text-[9px] text-slate-400">Official letters from Gwalior Nagar Nigam regarding resolution audits.</span>
+                              <span className="text-[9px] text-slate-400 block mt-0.5">Official letters from Gwalior Nagar Nigam regarding resolution audits.</span>
                             </div>
                           </label>
                         </div>
@@ -5094,12 +7203,268 @@ export default function App() {
                       <div className="pt-3 flex justify-end">
                         <button
                           type="submit"
-                          className="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase px-5 py-3 rounded-xl transition shadow-xs cursor-pointer min-h-[44px]"
                         >
                           Save Settings
                         </button>
                       </div>
                     </form>
+                  )}
+                  
+                  {/* Sub-tab 6: Gwalior Authority Attendance & Patrol Portal */}
+                  {profileSubTab === 'attendance' && currentUser && (currentUser.role === 'authority' || currentUser.role === 'admin') && (
+                    <div className="space-y-6 text-left">
+                      <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <h4 className="font-extrabold text-sm text-emerald-800 uppercase tracking-wider flex items-center space-x-1.5">
+                            <Clock className="w-4 h-4 text-emerald-600 animate-pulse" />
+                            <span>GMC Authority Attendance & Duty Portal</span>
+                          </h4>
+                          <p className="text-xs text-emerald-700/80">
+                            Logged in as <strong className="font-bold">{currentUser.name}</strong> • Level {currentUser.accessLevel === 'level_3' ? '3 (Commissioner/Admin)' : currentUser.accessLevel === 'level_2' ? '2 (Zonal Officer)' : '1 (Field Inspector)'}
+                          </p>
+                        </div>
+                        <div className="flex items-center space-x-2 bg-white/80 border border-emerald-200/50 px-3 py-1.5 rounded-xl self-start md:self-auto shrink-0 shadow-2xs">
+                          <span className={`w-2.5 h-2.5 rounded-full ${checkedInAttendanceToday ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`}></span>
+                          <span className="text-[10px] text-slate-700 font-extrabold uppercase tracking-wide">
+                            Today's Status: {checkedInAttendanceToday ? 'Active on Duty' : 'Pending Check-In'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {currentUser.verificationStatus !== 'verified' && (
+                        <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl flex items-start space-x-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                          <p className="font-medium">
+                            <strong>Notice:</strong> Your Gwalior Municipal Corporation profile is currently pending verification. Some attendance records are logged under audit mode.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+                        {/* Attendance Submission Form */}
+                        <div className="md:col-span-5 bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h5 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Patrol Shift Time Tracking</h5>
+                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border ${
+                              activePatrolSession ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-200 text-slate-600 border-slate-300'
+                            }`}>
+                              {activePatrolSession ? 'Shift Active' : 'Off-Duty'}
+                            </span>
+                          </div>
+                          
+                          {activePatrolSession ? (
+                            <div className="space-y-4">
+                              <div className="bg-amber-50/50 border border-amber-200/50 rounded-xl p-3.5 space-y-2.5">
+                                <div className="flex items-center space-x-2 text-amber-800">
+                                  <Clock className="w-4 h-4 animate-spin text-amber-600 [animation-duration:8s]" />
+                                  <h6 className="text-xs font-bold">On-Duty / Active Patrol Session</h6>
+                                </div>
+                                <div className="text-[11px] text-slate-600 space-y-1.5 font-medium">
+                                  <p>📍 <strong className="text-slate-800">Assigned Ward:</strong> {activePatrolSession.location}</p>
+                                  <p>⏱️ <strong className="text-slate-800">Check-In Time:</strong> {new Date(activePatrolSession.checkInTime || activePatrolSession.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p>
+                                  <p>📅 <strong className="text-slate-800">Date:</strong> {new Date(activePatrolSession.checkInTime || activePatrolSession.timestamp).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <label className="text-[9px] font-black uppercase text-slate-400 block">Patrol Summary & Actions Completed</label>
+                                <textarea
+                                  value={patrolSummaryText}
+                                  onChange={(e) => setPatrolSummaryText(e.target.value)}
+                                  placeholder="E.g., Cleared garbage dump at Bada, verified light functioning near Fort road..."
+                                  rows={3}
+                                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700 font-medium placeholder:text-slate-400"
+                                />
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={handleCheckout}
+                                disabled={isCheckingOut}
+                                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase py-3 rounded-xl transition duration-200 shadow-xs cursor-pointer min-h-[44px] flex items-center justify-center space-x-2 border-none"
+                              >
+                                {isCheckingOut ? (
+                                  <>
+                                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                    <span>Registering Check-Out...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <LogOut className="w-4 h-4" />
+                                    <span>End Patrol & Check-Out</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="space-y-1">
+                                <label className="text-[9px] font-black uppercase text-slate-400 block">Duty / Patrol Ward Area</label>
+                                <select 
+                                  value={attendanceLocation}
+                                  onChange={(e) => setAttendanceLocation(e.target.value)}
+                                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-700 min-h-[44px]"
+                                >
+                                  <option value="Lashkar Zone (Maharaj Bada)">Lashkar Zone (Maharaj Bada)</option>
+                                  <option value="Morar Zone (Thatipur)">Morar Zone (Thatipur)</option>
+                                  <option value="City Center Gwalior">City Center Gwalior</option>
+                                  <option value="Fort & Old Town Area">Fort & Old Town Area</option>
+                                  <option value="DD Nagar & Pinto Park">DD Nagar & Pinto Park</option>
+                                  <option value="Gwalior Nagar Nigam HQ">Gwalior Nagar Nigam HQ</option>
+                                </select>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={submitAttendance}
+                                disabled={isSubmittingAttendance}
+                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase py-3 rounded-xl transition duration-200 shadow-xs cursor-pointer min-h-[44px] flex items-center justify-center space-x-2 border-none"
+                              >
+                                {isSubmittingAttendance ? (
+                                  <>
+                                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                    <span>Starting Shift...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <MapPin className="w-4 h-4" />
+                                    <span>Check-In & Start Patrol Duty</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )}
+                          
+                          <div className="text-[10px] text-slate-400 leading-relaxed border-t pt-3 space-y-1">
+                            <p><strong>System Note:</strong> Gwalior municipal authorities are tracked on check-in and check-out to calculate precise duty hours.</p>
+                            <p className="text-emerald-600 font-bold">✓ Each official's records are tracked and compiled separately.</p>
+                          </div>
+                        </div>
+
+                        {/* Attendance Logs & App Opens History */}
+                        <div className="md:col-span-7 space-y-3">
+                          <h5 className="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Your Personal Log History</h5>
+                          
+                          {!currentUser.attendanceLogs || currentUser.attendanceLogs.length === 0 ? (
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center text-slate-400 text-xs">
+                              No log data recorded. Logs are created automatically when you launch the app or check-in.
+                            </div>
+                          ) : (
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin">
+                              {[...currentUser.attendanceLogs].reverse().map((log, idx) => (
+                                <div key={idx} className="bg-white border border-slate-100 rounded-xl p-3.5 flex items-start justify-between gap-3 shadow-2xs hover:border-slate-200 transition">
+                                  <div className="flex items-start space-x-2.5">
+                                    <div className={`p-2 rounded-lg shrink-0 ${log.type === 'manual_checkin' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-blue-50 text-blue-600 border border-blue-100'}`}>
+                                      {log.type === 'manual_checkin' ? <MapPin className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                                    </div>
+                                    <div className="space-y-0.5 text-left flex-1 min-w-0">
+                                      <p className="text-xs font-bold text-slate-700">
+                                        {log.type === 'manual_checkin' ? 'Patrol Check-In' : 'Civic App Activity'}
+                                      </p>
+                                      <p className="text-[10px] text-slate-500 font-medium">
+                                        Location: <strong className="text-slate-700">{log.location}</strong>
+                                        {log.latitude && log.longitude && (
+                                          <span className="text-[9px] text-emerald-600 ml-1.5 font-mono bg-emerald-50 px-1 py-0.5 rounded">
+                                            ({log.latitude.toFixed(4)}°N, {log.longitude.toFixed(4)}°E)
+                                          </span>
+                                        )}
+                                      </p>
+                                      
+                                      {/* check-in / check-out status and duration details */}
+                                      {log.type === 'manual_checkin' && (
+                                        <div className="mt-1.5 flex flex-wrap gap-2 text-[9px] items-center">
+                                          <span className={`px-1.5 py-0.5 rounded-sm font-bold uppercase tracking-wider ${
+                                            log.status === 'active' ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                          }`}>
+                                            {log.status === 'active' ? '● On Patrol (Active)' : '✓ Patrol Completed'}
+                                          </span>
+                                          {log.checkInTime && (
+                                            <span className="text-slate-500">
+                                              In: <strong>{new Date(log.checkInTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</strong>
+                                            </span>
+                                          )}
+                                          {log.checkOutTime && (
+                                            <span className="text-slate-500">
+                                              Out: <strong>{new Date(log.checkOutTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</strong>
+                                            </span>
+                                          )}
+                                          {log.status === 'completed' && log.durationMinutes !== undefined && (
+                                            <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">
+                                              ⏱️ Duration: {log.durationMinutes} mins
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {/* Patrol Summary Report */}
+                                      {log.patrolSummary && (
+                                        <div className="mt-1.5 p-2.5 bg-slate-50/80 rounded-xl border border-slate-150 text-[10px] text-slate-600 italic">
+                                          <strong className="text-slate-700 font-bold block not-italic text-[9px] uppercase tracking-wider text-emerald-700 mb-0.5">Patrol Shift Report:</strong>
+                                          "{log.patrolSummary}"
+                                        </div>
+                                      )}
+
+                                      <div className="flex flex-wrap gap-x-2 gap-y-1 text-[9px] text-slate-400 mt-1.5">
+                                        <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-sm font-semibold">
+                                          📖 Current: {log.pageOpened || 'Feed & Issues Board'}
+                                        </span>
+                                        {log.type !== 'manual_checkin' && (
+                                          <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-sm font-semibold">
+                                            ⏱️ Active: {log.durationMinutes || 5} mins
+                                          </span>
+                                        )}
+                                      </div>
+                                      
+                                      {/* Pages Visited in Session */}
+                                      {log.pagesVisited && log.pagesVisited.length > 0 && (
+                                        <div className="mt-1.5 pt-1.5 border-t border-dashed border-slate-100">
+                                          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-tight flex items-center gap-1 mb-1">
+                                            <span>👁️ Pages Visited ({log.pagesVisited.length})</span>
+                                          </p>
+                                          <div className="flex flex-wrap gap-1">
+                                            {log.pagesVisited.map((p, pIdx) => (
+                                              <span key={pIdx} className="bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded-md text-[8px] font-medium border border-slate-100">
+                                                {p}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Updates and Actions performed in Session */}
+                                      {log.updatesPerformed && log.updatesPerformed.length > 0 && (
+                                        <div className="mt-1.5 pt-1.5 border-t border-dashed border-slate-100">
+                                          <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-tight flex items-center gap-1 mb-1">
+                                            <span>✍️ Updates / Actions ({log.updatesPerformed.length})</span>
+                                          </p>
+                                          <ul className="space-y-1">
+                                            {log.updatesPerformed.map((u, uIdx) => (
+                                              <li key={uIdx} className="text-[8px] text-emerald-700 bg-emerald-50/50 px-1.5 py-0.5 rounded border border-emerald-100 flex items-center gap-1">
+                                                <span className="w-1 h-1 rounded-full bg-emerald-500 shrink-0" />
+                                                <span>{u}</span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0 font-mono text-[9px] text-slate-400">
+                                    <p className="font-bold text-slate-600">
+                                      {new Date(log.timestamp).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                    </p>
+                                    <p className="mt-0.5">
+                                      {new Date(log.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {/* High Level Tip */}
@@ -5124,258 +7489,1268 @@ export default function App() {
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
-                className="bg-white rounded-3xl border border-slate-200 p-6 md:p-8 shadow-xs space-y-6"
+                className="bg-white rounded-3xl border border-slate-200 p-4 md:p-8 shadow-xs space-y-6"
               >
-                <div className="border-b pb-3 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-800">Honorary Civic Leaderboard</h2>
-                    <p className="text-xs text-slate-500">Citizens driving localized resolution and neighborhood stewardship.</p>
+                <div className="border-b pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start space-x-3 text-left">
+                    <div className="p-2 bg-yellow-50 rounded-xl border border-yellow-150 shrink-0 mt-0.5">
+                      <Award className="w-5 h-5 text-yellow-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg md:text-xl font-bold text-slate-800">Honorary Civic Leaderboard</h2>
+                      <p className="text-xs text-slate-500">Citizens driving localized resolution and neighborhood stewardship.</p>
+                    </div>
                   </div>
-                  <Award className="w-6 h-6 text-yellow-500 animate-bounce" />
+                  
+                  {/* Density and Layout controls */}
+                  <div className="flex flex-wrap items-center gap-3 self-start sm:self-center">
+                    {/* View mode toggle */}
+                    <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 min-h-[38px]">
+                      <button
+                        type="button"
+                        onClick={() => setLeaderboardViewMode('cards')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${leaderboardViewMode === 'cards' ? 'bg-white text-slate-950 shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        Card Grid
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLeaderboardViewMode('table')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${leaderboardViewMode === 'table' ? 'bg-white text-slate-950 shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        Table View
+                      </button>
+                    </div>
+
+                    {/* Column density (Only visible when Card Grid is active) */}
+                    {leaderboardViewMode === 'cards' && (
+                      <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200 min-h-[38px]">
+                        <span className="text-[10px] font-black uppercase text-slate-400 px-2 sm:inline hidden">Density:</span>
+                        <button
+                          type="button"
+                          onClick={() => setLeaderboardMobileCols(1)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${leaderboardMobileCols === 1 ? 'bg-slate-950 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                          title="1 Column Grid"
+                        >
+                          1 Col
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLeaderboardMobileCols(2)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition ${leaderboardMobileCols === 2 ? 'bg-slate-950 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                          title="2 Columns Grid"
+                        >
+                          2 Col
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 text-slate-400 font-bold border-b text-[10px] uppercase tracking-wider">
-                        <th className="py-3 px-4">Rank</th>
-                        <th className="py-3 px-4">Citizen</th>
-                        <th className="py-3 px-4 text-center">Incidents Flagged</th>
-                        <th className="py-3 px-4 text-center">Verifications Completed</th>
-                        <th className="py-3 px-4 text-center">Achievements unlocked</th>
-                        <th className="py-3 px-4 text-right">Steward Points</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y text-slate-600">
-                      {leaderboard
-                        .filter(u => u.role === 'citizen')
-                        .sort((a, b) => b.points - a.points)
-                        .map((user, idx) => (
-                          <tr key={user.uid} className={`hover:bg-slate-50/50 transition ${user.uid === currentUser?.uid ? 'bg-blue-50/40 font-semibold' : ''}`}>
-                          <td className="py-4 px-4 font-black">
-                            {idx === 0 ? '🏆 1' : idx === 1 ? '🥈 2' : idx === 2 ? '🥉 3' : `${idx + 1}`}
-                          </td>
-                          <td className="py-4 px-4 flex items-center space-x-3">
-                            <img src={user.avatar} alt={user.name} className="w-9 h-9 rounded-full object-cover border" />
-                            <div>
-                              <p className="font-bold text-slate-800">{user.name}</p>
-                              <span className="text-[10px] text-slate-400">Ward: {idx === 0 ? 'Downtown Core' : 'Eastside Waterfront'}</span>
+                {leaderboardViewMode === 'cards' ? (
+                  /* Cards layout with custom density */
+                  <div className={`grid gap-4 ${leaderboardMobileCols === 1 ? 'grid-cols-1' : 'grid-cols-2'} md:grid-cols-3`}>
+                    {leaderboard
+                      .filter(u => u.role === 'citizen')
+                      .sort((a, b) => b.points - a.points)
+                      .map((user, idx) => (
+                        <div 
+                          key={user.uid} 
+                          className={`bg-white border rounded-2xl p-4 flex flex-col justify-between space-y-3.5 transition duration-200 relative overflow-hidden text-left ${
+                            user.uid === currentUser?.uid 
+                              ? 'border-blue-300 ring-2 ring-blue-50/50 shadow-sm bg-blue-50/10' 
+                              : 'border-slate-200 hover:border-slate-300 hover:shadow-xs'
+                          }`}
+                        >
+                          {/* Rank badge ribbon */}
+                          <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl font-mono text-[10px] font-black uppercase tracking-wider ${
+                            idx === 0 ? 'bg-yellow-100 text-yellow-800 border-l border-b border-yellow-200' :
+                            idx === 1 ? 'bg-slate-100 text-slate-800 border-l border-b border-slate-200' :
+                            idx === 2 ? 'bg-orange-100 text-orange-800 border-l border-b border-orange-200' :
+                            'bg-slate-50 text-slate-500 border-l border-b border-slate-150'
+                          }`}>
+                            {idx === 0 ? '🏆 Rank 1' : idx === 1 ? '🥈 Rank 2' : idx === 2 ? '🥉 Rank 3' : `#${idx + 1}`}
+                          </div>
+
+                          <div className="flex items-center space-x-3 pr-16">
+                            <img 
+                              src={user.avatar} 
+                              alt={user.name} 
+                              className="w-11 h-11 rounded-xl object-cover border border-slate-200 shadow-2xs" 
+                            />
+                            <div className="min-w-0">
+                              <h4 className="font-bold text-slate-800 text-sm truncate flex items-center gap-1">
+                                {user.name}
+                                {user.uid === currentUser?.uid && (
+                                  <span className="bg-blue-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded-sm uppercase tracking-wide">You</span>
+                                )}
+                              </h4>
+                              <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-0.5">Ward: {idx % 2 === 0 ? 'Downtown Core' : 'Eastside Waterfront'}</p>
                             </div>
-                          </td>
-                          <td className="py-4 px-4 text-center font-bold">{user.reportedCount}</td>
-                          <td className="py-4 px-4 text-center font-bold">{user.verifiedCount}</td>
-                          <td className="py-4 px-4 text-center">
-                            <div className="flex justify-center -space-x-1">
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-150 text-center">
+                            <div className="space-y-0.5">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Reported</span>
+                              <p className="text-xs font-black text-slate-700">{user.reportedCount}</p>
+                            </div>
+                            <div className="space-y-0.5 border-l border-slate-200">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Verified</span>
+                              <p className="text-xs font-black text-slate-700">{user.verifiedCount}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                            <div className="flex -space-x-1 shrink-0">
                               {user.badges.map((b, bIdx) => (
-                                <div key={bIdx} className="w-5 h-5 bg-amber-500 text-white rounded-full flex items-center justify-center border-2 border-white text-[8px] font-black" title={b.title}>
+                                <div 
+                                  key={bIdx} 
+                                  className="w-6 h-6 bg-gradient-to-tr from-yellow-400 to-amber-500 text-slate-950 rounded-full flex items-center justify-center border-2 border-white text-[9px] font-black shadow-3xs" 
+                                  title={b.title}
+                                >
                                   ★
                                 </div>
                               ))}
+                              {user.badges.length === 0 && (
+                                <span className="text-[9px] text-slate-400 font-semibold italic">No badges yet</span>
+                              )}
                             </div>
-                          </td>
-                          <td className="py-4 px-4 text-right font-black text-slate-800 text-sm">{user.points} pts</td>
-                        </tr>
+                            <div className="text-right">
+                              <p className="text-xs font-black text-blue-600">{user.points} pts</p>
+                              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">Steward Points</span>
+                            </div>
+                          </div>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-
+                  </div>
+                ) : (
+                  /* Standard wide table layout with responsive wrapper */
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-3xs bg-white">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 text-[10px] uppercase tracking-wider">
+                          <th className="py-3.5 px-4 font-extrabold">Rank</th>
+                          <th className="py-3.5 px-4 font-extrabold">Citizen</th>
+                          <th className="py-3.5 px-4 text-center font-extrabold">Incidents Flagged</th>
+                          <th className="py-3.5 px-4 text-center font-extrabold">Verifications Completed</th>
+                          <th className="py-3.5 px-4 text-center font-extrabold">Achievements Unlocked</th>
+                          <th className="py-3.5 px-4 text-right font-extrabold">Steward Points</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-600">
+                        {leaderboard
+                          .filter(u => u.role === 'citizen')
+                          .sort((a, b) => b.points - a.points)
+                          .map((user, idx) => (
+                            <tr key={user.uid} className={`hover:bg-slate-50/50 transition ${user.uid === currentUser?.uid ? 'bg-blue-50/40 font-semibold' : ''}`}>
+                              <td className="py-4 px-4 font-black text-slate-700">
+                                {idx === 0 ? '🏆 1' : idx === 1 ? '🥈 2' : idx === 2 ? '🥉 3' : `${idx + 1}`}
+                              </td>
+                              <td className="py-4 px-4 flex items-center space-x-3">
+                                <img src={user.avatar} alt={user.name} className="w-9 h-9 rounded-xl object-cover border border-slate-200" />
+                                <div>
+                                  <p className="font-bold text-slate-800 flex items-center gap-1.5">
+                                    {user.name}
+                                    {user.uid === currentUser?.uid && (
+                                      <span className="bg-blue-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded-sm uppercase tracking-wide">You</span>
+                                    )}
+                                  </p>
+                                  <span className="text-[10px] text-slate-400">Ward: {idx % 2 === 0 ? 'Downtown Core' : 'Eastside Waterfront'}</span>
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 text-center font-bold text-slate-700">{user.reportedCount}</td>
+                              <td className="py-4 px-4 text-center font-bold text-slate-700">{user.verifiedCount}</td>
+                              <td className="py-4 px-4 text-center">
+                                <div className="flex justify-center -space-x-1">
+                                  {user.badges.map((b, bIdx) => (
+                                    <div key={bIdx} className="w-5.5 h-5.5 bg-amber-500 text-white rounded-full flex items-center justify-center border-2 border-white text-[8px] font-black shadow-3xs" title={b.title}>
+                                      ★
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 text-right font-black text-slate-800 text-sm">{user.points} pts</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </motion.div>
             )}
 
             {/* View 8: Municipal Admin Verification and Access Panel */}
-            {activeTab === 'admin_panel' && currentUser?.role === 'admin' && (
+            {activeTab === 'admin_panel' && (currentUser?.role === 'admin' || (currentUser?.role === 'authority' && currentUser?.accessLevel === 'level_3')) && (
               <motion.div 
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
-                className="bg-white rounded-3xl border border-slate-200 p-6 md:p-8 shadow-xs space-y-6"
+                className="bg-white rounded-2xl border border-slate-200/80 pt-5 pb-5 md:pt-8 md:pb-8 pl-[9.25px] pr-[9.25px] md:pl-[9.25px] md:pr-[9.25px] shadow-sm space-y-8"
               >
-                <div className="border-b pb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-800 flex items-center space-x-2">
-                      <Shield className="w-5 h-5 text-indigo-600" />
-                      <span>Municipal Operations & Authority Verification</span>
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-1">Review pending official applications, audit Gwalior staff credentials, and update municipal clearance levels.</p>
+                {/* Google Product Style Header */}
+                <div className="border-b border-slate-150 pb-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="text-left space-y-1">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="p-2 bg-blue-50 rounded-xl border border-blue-100">
+                        <Shield className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <h2 className="text-lg md:text-xl font-bold tracking-tight text-slate-900 font-sans">
+                        {currentUser?.accessLevel === 'level_3' ? 'Executive Operations Console' : 'GMC Admin Control Center'}
+                      </h2>
+                    </div>
+                    <p className="text-xs text-slate-500 max-w-2xl leading-relaxed pl-[6px] ml-[5px] mr-[5px] pr-[5px]">
+                      {currentUser?.accessLevel === 'level_3'
+                        ? 'System-wide monitoring of Gwalior Municipal Corporation, including official verifications, personnel management, and zonal inspector attendance metrics.'
+                        : 'Review official credentials, assign municipal access, audit live attendance maps, and configure clearance tiers across active zones.'}
+                    </p>
                   </div>
                   
-                  <div className="flex items-center space-x-2 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl shrink-0">
-                    <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full animate-pulse"></span>
-                    <span className="text-[11px] text-indigo-800 font-extrabold uppercase tracking-wider font-mono">
-                      System Operator: Active
+                  <div className="flex items-center space-x-2 bg-emerald-50 border border-emerald-100/80 px-3 py-1.5 rounded-full shrink-0 self-start md:self-center">
+                    <span className="w-2 h-2 bg-emerald-600 rounded-full animate-ping"></span>
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full absolute"></span>
+                    <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider font-mono pl-1">
+                      {currentUser?.accessLevel === 'level_3' ? 'Commissioner Online' : 'Operator Active'}
                     </span>
                   </div>
                 </div>
 
-                {/* Statistics Banner */}
+                {/* Google Material 3-style Metrics Cards (Bento) */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center space-x-3.5">
-                    <div className="p-3 rounded-xl bg-amber-500/10 text-amber-600 shrink-0">
+                  <div className="bg-slate-50/50 hover:bg-slate-50 border border-slate-200/60 rounded-2xl p-5 flex items-center space-x-4 transition-all duration-200">
+                    <div className="p-3 rounded-2xl bg-[#fef7e0] text-[#b06000] shrink-0 border border-[#fbe9b9]">
                       <Clock className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">Pending Approvals</p>
-                      <h4 className="text-lg font-black text-slate-800">
-                        {leaderboard.filter(u => u.role === 'authority' && u.verificationStatus === 'pending').length} Staff
+                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pending Approvals</p>
+                      <h4 className="text-xl font-bold text-slate-900 mt-0.5">
+                        {leaderboard.filter(u => u.role === 'authority' && u.verificationStatus === 'pending').length} Applicants
                       </h4>
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center space-x-3.5">
-                    <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-600 shrink-0">
+                  <div className="bg-slate-50/50 hover:bg-slate-50 border border-slate-200/60 rounded-2xl p-5 flex items-center space-x-4 transition-all duration-200">
+                    <div className="p-3 rounded-2xl bg-[#e6f4ea] text-[#137333] shrink-0 border border-[#ceead6]">
                       <CheckCircle className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">Verified Authorities</p>
-                      <h4 className="text-lg font-black text-slate-800">
+                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Verified GMC Staff</p>
+                      <h4 className="text-xl font-bold text-slate-900 mt-0.5">
                         {leaderboard.filter(u => u.role === 'authority' && u.verificationStatus === 'verified').length} Approved
                       </h4>
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center space-x-3.5">
-                    <div className="p-3 rounded-xl bg-blue-500/10 text-blue-600 shrink-0">
+                  <div className="bg-slate-50/50 hover:bg-slate-50 border border-slate-200/60 rounded-2xl p-5 flex items-center space-x-4 transition-all duration-200">
+                    <div className="p-3 rounded-2xl bg-[#e8f0fe] text-[#1a73e8] shrink-0 border border-[#d2e3fc]">
                       <User className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">Total Registered Users</p>
-                      <h4 className="text-lg font-black text-slate-800">
-                        {leaderboard.length} Users
+                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Registered</p>
+                      <h4 className="text-xl font-bold text-slate-900 mt-0.5">
+                        {leaderboard.length} Citizens
                       </h4>
                     </div>
                   </div>
                 </div>
 
-                {/* Main Table for approvals */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-extrabold text-slate-700 uppercase tracking-wider">Official Gwalior Roster</h3>
-                  
-                  <div className="overflow-x-auto border border-slate-200 rounded-2xl bg-slate-50/50">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="bg-slate-100 text-slate-500 font-bold border-b text-[10px] uppercase tracking-wider">
-                          <th className="py-3 px-4">Officer/Applicant</th>
-                          <th className="py-3 px-4">Contact/Role</th>
-                          <th className="py-3 px-4">Verification Status</th>
-                          <th className="py-3 px-4">Clearance Level</th>
-                          <th className="py-3 px-4 text-right">Actions / Assignment</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y text-slate-600 bg-white">
-                        {leaderboard.filter(u => u.role === 'authority' || u.role === 'admin').map((user) => {
+                {/* Sub-navigation Controls & Interactive Filter (Material Segmented Control) */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200/60 pb-4 gap-4">
+                  {/* Segmented Pill Selector */}
+                  <div className="bg-slate-100 p-1 rounded-xl inline-flex border border-slate-200/60 self-start text-center pl-[3.25px] ml-[20px] mr-[20px]">
+                    <button
+                      type="button"
+                      onClick={() => setAdminSubTab('roster')}
+                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer min-h-[36px] ${
+                        adminSubTab === 'roster'
+                          ? 'bg-white text-blue-600 shadow-sm border border-slate-200/20'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>Personnel Roster</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdminSubTab('attendance_reports');
+                        fetchAttendanceReports();
+                      }}
+                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer min-h-[36px] ${
+                        adminSubTab === 'attendance_reports'
+                          ? 'bg-white text-blue-600 shadow-sm border border-slate-200/20'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Attendance & Duty Logs</span>
+                    </button>
+                  </div>
+
+                  {/* Real-time search filter */}
+                  {adminSubTab === 'roster' && (
+                    <div className="relative w-full md:max-w-xs self-stretch md:self-auto">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Search className="h-3.5 w-3.5 text-slate-400" />
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Search roster by name, email or UID..."
+                        value={adminSearchQuery}
+                        onChange={(e) => setAdminSearchQuery(e.target.value)}
+                        className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 hover:border-slate-300 focus:border-blue-500 text-xs px-3.5 py-2 pl-9 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 text-slate-800"
+                      />
+                      {adminSearchQuery && (
+                        <button
+                          onClick={() => setAdminSearchQuery('')}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 text-xs font-mono"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Sub-tab 1: Personnel Roster Tab */}
+                {adminSubTab === 'roster' && (
+                  <div className="space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/50">
+                      <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider text-left">
+                        Official Gwalior Municipal Corporation Directory
+                      </h3>
+                      
+                      <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+                        {/* Customizable density layout toggler */}
+                        <div className="md:hidden flex items-center space-x-1 bg-white border border-slate-200 p-0.5 rounded-lg shrink-0 min-h-[32px]">
+                          <span className="text-[8px] font-black uppercase text-slate-400 px-1.5">Density:</span>
+                          <button
+                            type="button"
+                            onClick={() => setAdminMobileColumns(1)}
+                            className={`px-2 py-1 rounded text-[9px] font-bold cursor-pointer transition ${adminMobileColumns === 1 ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            title="1 Column Grid"
+                          >
+                            1 Col
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAdminMobileColumns(2)}
+                            className={`px-2 py-1 rounded text-[9px] font-bold cursor-pointer transition ${adminMobileColumns === 2 ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
+                            title="2 Columns Parallel Grid"
+                          >
+                            2 Col
+                          </button>
+                        </div>
+
+                        <span className="text-[10px] text-slate-500 font-bold bg-white px-2.5 py-1 rounded-md border border-slate-200 shrink-0">
+                          {
+                            leaderboard.filter(u => {
+                              if (u.role !== 'authority' && u.role !== 'admin') return false;
+                              const q = adminSearchQuery.toLowerCase();
+                              return u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.uid || '').toLowerCase().includes(q);
+                            }).length
+                          } verified officials & applicants
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Mobile-First Layout: Card-Based Layout with custom column density */}
+                    <div className={`grid md:hidden gap-3 ${adminMobileColumns === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                      {leaderboard
+                        .filter(u => {
+                          if (u.role !== 'authority' && u.role !== 'admin') return false;
+                          const q = adminSearchQuery.toLowerCase();
+                          return u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.uid || '').toLowerCase().includes(q);
+                        })
+                        .map((user) => {
                           const isPending = user.verificationStatus === 'pending';
                           const isVerified = user.verificationStatus === 'verified';
                           const isRejected = user.verificationStatus === 'rejected';
+                          const userDept = user.department || 'water';
+                          const userLevel = user.authorityLevel || 'inspector';
+                          const isExpanded = !!expandedUserUids[user.uid];
 
                           return (
-                            <tr key={user.uid} className="hover:bg-slate-50 transition">
-                              <td className="py-4 px-4 flex items-center space-x-3">
-                                <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-xl object-cover border-2 border-slate-200 shadow-xs animate-none" referrerPolicy="no-referrer" />
-                                <div>
-                                  <p className="font-bold text-slate-800">{user.name}</p>
-                                  <span className="text-[10px] text-slate-400 font-mono">UID: {user.uid}</span>
-                                </div>
-                              </td>
-
-                              <td className="py-4 px-4">
-                                <p className="font-medium text-slate-700">{user.email || 'No Email'}</p>
-                                <span className={`inline-block text-[9px] uppercase font-black tracking-wider px-2 py-0.5 rounded-full ${
-                                  user.role === 'admin' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-red-100 text-red-700 border border-red-200'
-                                }`}>
-                                  {user.role === 'admin' ? 'System Administrator' : 'Municipal Authority'}
-                                </span>
-                              </td>
-
-                              <td className="py-4 px-4">
-                                {isPending && (
-                                  <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-bold text-[10px]">
-                                    <Clock className="w-3.5 h-3.5 text-amber-500 animate-spin" />
-                                    <span>Pending GMC Verification</span>
-                                  </span>
-                                )}
-                                {isVerified && (
-                                  <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px]">
-                                    <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-                                    <span>GMC Verified & Active</span>
-                                  </span>
-                                )}
-                                {isRejected && (
-                                  <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[10px]">
-                                    <X className="w-3.5 h-3.5 text-rose-500" />
-                                    <span>Application Rejected</span>
-                                  </span>
-                                )}
-                              </td>
-
-                              <td className="py-4 px-4">
-                                {user.role === 'admin' ? (
-                                  <span className="text-xs font-bold text-purple-700">Level 3 (Root Override)</span>
-                                ) : (
-                                  <div className="flex flex-col space-y-1">
-                                    <select
-                                      disabled={user.role === 'admin'}
-                                      value={user.accessLevel || 'none'}
-                                      onChange={(e) => {
-                                        handleAdminVerifyUser(user.uid, user.verificationStatus as any, e.target.value as any);
-                                      }}
-                                      className="bg-white border border-slate-200 rounded-xl px-2 py-1.5 text-xs text-slate-700 focus:outline-hidden focus:border-indigo-500 font-bold cursor-pointer disabled:bg-slate-100"
-                                    >
-                                      <option value="none">No Level (Revoked)</option>
-                                      <option value="level_1">Level 1 (Field Inspector)</option>
-                                      <option value="level_2">Level 2 (Department Head)</option>
-                                      <option value="level_3">Level 3 (Municipal Commissioner)</option>
-                                    </select>
-                                    <span className="text-[9px] text-slate-400 font-semibold leading-relaxed">
-                                      {user.accessLevel === 'level_3' ? 'Full administrative rights' : user.accessLevel === 'level_2' ? 'Can update status' : user.accessLevel === 'level_1' ? 'Can inspect' : 'No rights assigned'}
-                                    </span>
+                              <div 
+                                key={user.uid} 
+                                className="bg-white rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between transition-all duration-150 hover:border-slate-300"
+                              >
+                                {/* Collapsible Header */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExpandedUserUids(prev => ({
+                                      ...prev,
+                                      [user.uid]: !prev[user.uid]
+                                    }));
+                                  }}
+                                  className="w-full text-left p-4 flex items-center justify-between hover:bg-slate-50/50 transition duration-150 rounded-xl focus:outline-none"
+                                >
+                                  <div className="flex items-center space-x-3 text-left min-w-0 flex-1">
+                                    <div className="relative shrink-0">
+                                      <img 
+                                        src={user.avatar} 
+                                        alt={user.name} 
+                                        className="w-10 h-10 rounded-xl object-cover border border-slate-200 bg-slate-50" 
+                                        referrerPolicy="no-referrer" 
+                                      />
+                                      {isVerified && (
+                                        <span className="absolute -bottom-1 -right-1 bg-emerald-500 border border-white text-white p-0.5 rounded-full" title="GMC Authenticated">
+                                          <Check className="w-2.5 h-2.5" strokeWidth={3} />
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="space-y-0.5 min-w-0 flex-1">
+                                      <h4 className="font-bold text-slate-800 leading-tight text-sm truncate">
+                                        {user.name}
+                                      </h4>
+                                      <span className={`inline-block text-[8px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${
+                                        user.role === 'admin' 
+                                          ? 'bg-purple-50 text-purple-700 border-purple-150' 
+                                          : user.accessLevel === 'level_3'
+                                          ? 'bg-rose-50 text-rose-700 border-rose-150'
+                                          : user.accessLevel === 'level_2'
+                                          ? 'bg-indigo-50 text-indigo-700 border-indigo-150'
+                                          : user.accessLevel === 'level_1'
+                                          ? 'bg-teal-50 text-teal-700 border-teal-150'
+                                          : 'bg-slate-50 text-slate-500 border-slate-200'
+                                      }`}>
+                                        {user.role === 'admin' 
+                                          ? 'Root Admin' 
+                                          : user.accessLevel === 'level_3'
+                                          ? 'Level 3 (Commissioner)'
+                                          : user.accessLevel === 'level_2'
+                                          ? 'Level 2 (Dept Head)'
+                                          : user.accessLevel === 'level_1'
+                                          ? 'Level 1 (Inspector)'
+                                          : 'Level: Unassigned'}
+                                      </span>
+                                    </div>
                                   </div>
-                                )}
-                              </td>
+                                  
+                                  <div className="flex items-center space-x-2 shrink-0">
+                                    {/* Tiny pending dot indicator if collapsed */}
+                                    {!isExpanded && isPending && (
+                                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                                    )}
+                                    <div className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition">
+                                      {isExpanded ? (
+                                        <ChevronUp className="w-4 h-4 stroke-[2.5]" />
+                                      ) : (
+                                        <ChevronDown className="w-4 h-4 stroke-[2.5]" />
+                                      )}
+                                    </div>
+                                  </div>
+                                </button>
 
-                              <td className="py-4 px-4 text-right">
-                                {user.role !== 'admin' && (
-                                  <div className="flex items-center justify-end space-x-2">
-                                    {!isVerified ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAdminVerifyUser(user.uid, 'verified', user.accessLevel || 'level_1')}
-                                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black tracking-wider uppercase transition cursor-pointer"
-                                      >
-                                        Approve GMC Access
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAdminVerifyUser(user.uid, 'rejected', 'none')}
-                                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-[10px] font-black tracking-wider uppercase transition cursor-pointer"
-                                      >
-                                        Reject GMC Access
-                                      </button>
+                                {/* Collapsible Details Panel with smooth layout transition */}
+                                {isExpanded && (
+                                  <div className="border-t border-slate-100 p-4 pt-3.5 space-y-4 bg-slate-50/40 rounded-b-xl text-left">
+                                    {/* Email */}
+                                    <div className="space-y-0.5">
+                                      <span className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Email Address</span>
+                                      <p className="text-xs font-semibold text-slate-700 truncate">{user.email || 'no-email@gwalior.gov.in'}</p>
+                                    </div>
+
+                                    {/* Department & Designation Badges */}
+                                    {user.role === 'authority' && (
+                                      <div className="space-y-1">
+                                        <span className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Assigned Duty</span>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-100/60 flex items-center gap-1">
+                                            {DEPARTMENTS[userDept]?.icon || '🏢'} {DEPARTMENTS[userDept]?.label || 'Unassigned'}
+                                          </span>
+                                          <span className="text-[9px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100/60 flex items-center gap-1">
+                                            {AUTHORITY_LEVELS[userLevel]?.badge || '🛡️'} {AUTHORITY_LEVELS[userLevel]?.label || 'Officer'}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Verification Status Banner */}
+                                    <div className="space-y-1">
+                                      <span className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Status</span>
+                                      {isPending && (
+                                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-850 border border-amber-200 font-bold text-[9px]">
+                                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping" />
+                                          <span>Pending Approval</span>
+                                        </span>
+                                      )}
+                                      {isVerified && (
+                                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-850 border border-emerald-200 font-bold text-[9px]">
+                                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                                          <span>Verified Active</span>
+                                        </span>
+                                      )}
+                                      {isRejected && (
+                                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-rose-50 text-rose-850 border border-rose-200 font-bold text-[9px]">
+                                          <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
+                                          <span>Access Revoked</span>
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Access Allocation Dropdowns */}
+                                    {user.role !== 'admin' && (
+                                      <div className="space-y-3 pt-1">
+                                        {/* Clearance Tier Dropdown */}
+                                        <div className="space-y-1">
+                                          <label className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Access Clearance</label>
+                                          <select
+                                            value={user.accessLevel || 'none'}
+                                            onChange={(e) => {
+                                              handleAdminVerifyUser(user.uid, user.verificationStatus as any, e.target.value as any, user.role, userDept, userLevel);
+                                            }}
+                                            className="w-full bg-white hover:bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-bold cursor-pointer transition focus:ring-2 focus:ring-blue-100 focus:outline-none min-h-[36px]"
+                                          >
+                                            <option value="none">No Level (Unassigned)</option>
+                                            <option value="level_1">Level 1 (Field Inspector)</option>
+                                            <option value="level_2">Level 2 (Department Head)</option>
+                                            <option value="level_3">Level 3 (Municipal Commissioner)</option>
+                                          </select>
+                                        </div>
+
+                                        {/* Department & Designation: only shown on 1-column density */}
+                                        {adminMobileColumns === 1 && (
+                                          <>
+                                            <div className="space-y-1">
+                                              <label className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Assigned Department</label>
+                                              <select
+                                                value={userDept}
+                                                onChange={(e) => {
+                                                  handleAdminVerifyUser(user.uid, user.verificationStatus as any, user.accessLevel, user.role, e.target.value, userLevel);
+                                                }}
+                                                className="w-full bg-white hover:bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-bold cursor-pointer transition focus:ring-2 focus:ring-blue-100 focus:outline-none min-h-[36px]"
+                                              >
+                                                {Object.entries(DEPARTMENTS).map(([key, val]) => (
+                                                  <option key={key} value={key}>{val.icon} {val.label}</option>
+                                                ))}
+                                              </select>
+                                            </div>
+
+                                            <div className="space-y-1">
+                                              <label className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Designation Title</label>
+                                              <select
+                                                value={userLevel}
+                                                onChange={(e) => {
+                                                  handleAdminVerifyUser(user.uid, user.verificationStatus as any, user.accessLevel, user.role, userDept, e.target.value);
+                                                }}
+                                                className="w-full bg-white hover:bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-bold cursor-pointer transition focus:ring-2 focus:ring-blue-100 focus:outline-none min-h-[36px]"
+                                              >
+                                                {Object.entries(AUTHORITY_LEVELS).map(([key, val]) => (
+                                                  <option key={key} value={key}>{val.badge} {val.label}</option>
+                                                ))}
+                                              </select>
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Action Buttons */}
+                                    {user.role !== 'admin' && (
+                                      <div className="pt-2.5 flex items-center justify-end">
+                                        {!isVerified ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAdminVerifyUser(user.uid, 'verified', user.accessLevel || 'level_1', user.role, userDept, userLevel)}
+                                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition shadow-sm cursor-pointer min-h-[40px] flex items-center justify-center"
+                                          >
+                                            Grant Verification
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAdminVerifyUser(user.uid, 'rejected', 'none', user.role, userDept, userLevel)}
+                                            className="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold tracking-wider uppercase transition cursor-pointer min-h-[40px] flex items-center justify-center"
+                                          >
+                                            Revoke Access
+                                          </button>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
                                 )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                              </div>
+                            );
+                          })}
+                      {leaderboard.filter(u => {
+                        if (u.role !== 'authority' && u.role !== 'admin') return false;
+                        const q = adminSearchQuery.toLowerCase();
+                        return u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.uid || '').toLowerCase().includes(q);
+                      }).length === 0 && (
+                        <div className="text-center py-10 text-slate-400 bg-white border border-slate-200 rounded-xl col-span-full">
+                          No registered personnel matched "{adminSearchQuery}".
+                        </div>
+                      )}
+                    </div>
 
-                {/* Additional Guidance */}
-                <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex items-start space-x-3 text-xs leading-relaxed text-indigo-950">
-                  <Info className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="font-extrabold text-indigo-900">Understanding GMC Access Clearance Levels</p>
-                    <ul className="list-disc pl-4 space-y-1 mt-1 text-indigo-900">
-                      <li><strong>Level 1 (Field Inspector):</strong> Assigned to field team operators. Can perform site inspections, view reported citizen images, and draft operational comments.</li>
-                      <li><strong>Level 2 (Department Head):</strong> Assigned to specific departmental leads. Can assign issues to inspectors and move status (e.g., In Progress, Resolved).</li>
-                      <li><strong>Level 3 (Municipal Commissioner):</strong> Highest clearance tier. Full access to Gwalior municipal configurations, executive priorities, and absolute oversight.</li>
+                    {/* Desktop View: Full-Featured Table */}
+                    <div className="hidden md:block overflow-hidden border border-slate-200 rounded-xl bg-white shadow-xs">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50/80 text-slate-500 font-bold border-b border-slate-200/60 text-[10px] uppercase tracking-wider">
+                              <th className="py-3.5 px-4 font-bold">Officer / Application</th>
+                              <th className="py-3.5 px-4 font-bold">Contact Details</th>
+                              <th className="py-3.5 px-4 font-bold">Verification Status</th>
+                              <th className="py-3.5 px-4 font-bold">Access Allocation</th>
+                              <th className="py-3.5 px-4 font-bold text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-slate-600">
+                            {leaderboard
+                              .filter(u => {
+                                if (u.role !== 'authority' && u.role !== 'admin') return false;
+                                const q = adminSearchQuery.toLowerCase();
+                                return u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.uid || '').toLowerCase().includes(q);
+                              })
+                              .map((user) => {
+                                const isPending = user.verificationStatus === 'pending';
+                                const isVerified = user.verificationStatus === 'verified';
+                                const isRejected = user.verificationStatus === 'rejected';
+                                const userDept = user.department || 'water';
+                                const userLevel = user.authorityLevel || 'inspector';
+
+                                return (
+                                  <tr key={user.uid} className="hover:bg-slate-50/50 transition duration-150">
+                                    {/* Column 1: Avatar & Identity Details */}
+                                    <td className="py-4 px-4">
+                                      <div className="flex items-center space-x-3.5">
+                                        <div className="relative">
+                                          <img 
+                                            src={user.avatar} 
+                                            alt={user.name} 
+                                            className="w-10 h-10 rounded-xl object-cover border border-slate-250 bg-slate-50" 
+                                            referrerPolicy="no-referrer" 
+                                          />
+                                          {isVerified && (
+                                            <span className="absolute -bottom-1 -right-1 bg-emerald-500 border-2 border-white text-white p-0.5 rounded-full" title="GMC Authenticated">
+                                              <Check className="w-2.5 h-2.5" strokeWidth={3} />
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-left">
+                                          <p className="font-bold text-slate-800 text-sm">{user.name}</p>
+                                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                            <span className="text-[9px] text-slate-400 font-mono bg-slate-100/80 px-1.5 py-0.5 rounded border border-slate-200/30">
+                                              UID: {user.uid.substring(0, 8)}...
+                                            </span>
+                                            {user.role === 'authority' && (
+                                              <>
+                                                <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 flex items-center gap-1">
+                                                  {DEPARTMENTS[userDept]?.icon || '🏢'} {DEPARTMENTS[userDept]?.label || 'Unassigned'}
+                                                </span>
+                                                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 flex items-center gap-1">
+                                                  {AUTHORITY_LEVELS[userLevel]?.badge || '🛡️'} {AUTHORITY_LEVELS[userLevel]?.label || 'Officer'}
+                                                </span>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+
+                                    {/* Column 2: Role and Email */}
+                                    <td className="py-4 px-4 text-left">
+                                      <p className="font-medium text-slate-700">{user.email || 'no-email@gwalior.gov.in'}</p>
+                                      <span className={`inline-block text-[9px] uppercase font-black tracking-wider px-2 py-0.5 rounded mt-1 ${
+                                        user.role === 'admin' 
+                                          ? 'bg-purple-50 text-purple-700 border border-purple-100' 
+                                          : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                                      }`}>
+                                        {user.role === 'admin' ? 'Root Administrator' : 'Municipal Official'}
+                                      </span>
+                                    </td>
+
+                                    {/* Column 3: Status Badge */}
+                                    <td className="py-4 px-4 text-left">
+                                      {isPending && (
+                                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-bold text-[10px]">
+                                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping" />
+                                          <span>Pending Approval</span>
+                                        </span>
+                                      )}
+                                      {isVerified && (
+                                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-[10px]">
+                                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                                          <span>Verified Active</span>
+                                        </span>
+                                      )}
+                                      {isRejected && (
+                                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200 font-bold text-[10px]">
+                                          <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
+                                          <span>Access Revoked</span>
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    {/* Column 4: Clearance Levels Controls */}
+                                    <td className="py-4 px-4 text-left">
+                                      {user.role === 'admin' ? (
+                                        <span className="text-xs font-bold text-purple-700 font-mono">System Owner</span>
+                                      ) : (
+                                        <div className="flex flex-col space-y-2 max-w-[210px]">
+                                          {/* Clearance Tier Dropdown */}
+                                          <div className="space-y-0.5">
+                                            <label className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Access Clearance</label>
+                                            <select
+                                              value={user.accessLevel || 'none'}
+                                              onChange={(e) => {
+                                                handleAdminVerifyUser(user.uid, user.verificationStatus as any, e.target.value as any, user.role, userDept, userLevel);
+                                              }}
+                                              className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-bold cursor-pointer transition focus:ring-2 focus:ring-blue-100 focus:outline-none"
+                                            >
+                                              <option value="none">No Level (Unassigned)</option>
+                                              <option value="level_1">Level 1 (Field Inspector)</option>
+                                              <option value="level_2">Level 2 (Department Head)</option>
+                                              <option value="level_3">Level 3 (Municipal Commissioner)</option>
+                                            </select>
+                                          </div>
+
+                                          {/* Department Dropdown */}
+                                          <div className="space-y-0.5">
+                                            <label className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Assigned Department</label>
+                                            <select
+                                              value={userDept}
+                                              onChange={(e) => {
+                                                handleAdminVerifyUser(user.uid, user.verificationStatus as any, user.accessLevel, user.role, e.target.value, userLevel);
+                                              }}
+                                              className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-bold cursor-pointer transition focus:ring-2 focus:ring-blue-100 focus:outline-none"
+                                            >
+                                              {Object.entries(DEPARTMENTS).map(([key, val]) => (
+                                                <option key={key} value={key}>{val.icon} {val.label}</option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          {/* Designation Dropdown */}
+                                          <div className="space-y-0.5">
+                                            <label className="text-[8px] font-black uppercase text-slate-400 block tracking-wider">Designation Title</label>
+                                            <select
+                                              value={userLevel}
+                                              onChange={(e) => {
+                                                handleAdminVerifyUser(user.uid, user.verificationStatus as any, user.accessLevel, user.role, userDept, e.target.value);
+                                              }}
+                                              className="w-full bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 font-bold cursor-pointer transition focus:ring-2 focus:ring-blue-100 focus:outline-none"
+                                            >
+                                              {Object.entries(AUTHORITY_LEVELS).map(([key, val]) => (
+                                                <option key={key} value={key}>{val.badge} {val.label}</option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* Column 5: Approval Buttons */}
+                                    <td className="py-4 px-4 text-right">
+                                      {user.role !== 'admin' && (
+                                        <div className="flex items-center justify-end">
+                                          {!isVerified ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleAdminVerifyUser(user.uid, 'verified', user.accessLevel || 'level_1', user.role, userDept, userLevel)}
+                                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold tracking-wider uppercase transition-colors shadow-sm cursor-pointer min-h-[32px]"
+                                            >
+                                              Grant Verification
+                                           </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleAdminVerifyUser(user.uid, 'rejected', 'none', user.role, userDept, userLevel)}
+                                              className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-colors cursor-pointer min-h-[32px]"
+                                            >
+                                              Revoke Access
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            {leaderboard.filter(u => {
+                              if (u.role !== 'authority' && u.role !== 'admin') return false;
+                              const q = adminSearchQuery.toLowerCase();
+                              return u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.uid || '').toLowerCase().includes(q);
+                            }).length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="text-center py-10 text-slate-400">
+                                  No registered personnel matched "{adminSearchQuery}".
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sub-tab 2: Attendance & Patrol Logs Tab */}
+                {adminSubTab === 'attendance_reports' && (
+                  <div className="space-y-6">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200/60 pb-3 gap-3 text-left">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5 ml-[5px]">
+                          <Activity className="w-4 h-4 text-emerald-600" />
+                          <span>GMC Live Field Patrol & Presence Logs</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-400 mt-0.5 ml-[5px] pl-[5px]">
+                          Real-time audit track of Level 1 & Level 2 officers: including precise geo-fenced patrol check-ins, app engagement sessions, and page history.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={fetchAttendanceReports}
+                        disabled={isFetchingReports}
+                        className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer self-start md:self-auto min-h-[40px] focus:outline-none ml-[5px]"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isFetchingReports ? 'animate-spin' : ''}`} />
+                        <span>Force Sync Logs</span>
+                      </button>
+                    </div>
+
+                    {isFetchingReports && attendanceReports.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center p-16 space-y-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                        <span className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider font-mono">
+                          Synchronizing with Gwalior Nagar Nigam Database...
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        {/* Column 1: Duty Activity Overview list */}
+                        <div className="lg:col-span-7 space-y-3.5 text-left">
+                          <h5 className="font-bold text-xs text-slate-400 uppercase tracking-wider">
+                            Verified Duty Officers
+                          </h5>
+                          
+                          <div className="overflow-hidden border border-slate-200/80 rounded-2xl bg-white shadow-2xs">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50/80 text-slate-400 font-bold border-b border-slate-200/60 text-[10px] uppercase tracking-wider">
+                                    <th className="py-3 px-4 font-bold">Duty Officer</th>
+                                    <th className="py-3 px-4 text-center font-bold">App Opens</th>
+                                    <th className="py-3 px-4 text-center font-bold">Patrol Audits</th>
+                                    <th className="py-3 px-4 text-right font-bold">Details</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-slate-600">
+                                  {attendanceReports.map((report) => {
+                                    const isSelected = selectedReportUser?.uid === report.uid;
+                                    return (
+                                      <tr 
+                                        key={report.uid} 
+                                        className={`hover:bg-slate-50/50 transition cursor-pointer ${
+                                          isSelected ? 'bg-blue-50/40 hover:bg-blue-50/40 border-l-4 border-blue-600' : ''
+                                        }`}
+                                        onClick={() => setSelectedReportUser(report)}
+                                      >
+                                        <td className="py-3.5 px-4">
+                                          <div className="flex items-center space-x-3 w-[129px]">
+                                            <img 
+                                              src={report.avatar} 
+                                              alt={report.name} 
+                                              className="w-8 h-8 rounded-lg object-cover border border-slate-200 bg-slate-50" 
+                                              referrerPolicy="no-referrer" 
+                                            />
+                                            <div className="text-left">
+                                              <p className="font-bold text-slate-800">{report.name}</p>
+                                              <span className="inline-block text-[9px] uppercase font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100/50 mt-0.5">
+                                                {report.accessLevel === 'level_2' ? 'Zonal Officer (L2)' : 'Field Inspector (L1)'}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </td>
+                                        <td className="py-3.5 px-4 text-center font-bold font-mono text-slate-700 w-[34.9167px]">
+                                          {report.appOpensCount}
+                                        </td>
+                                        <td className="py-3.5 px-4 text-center font-bold font-mono text-emerald-600">
+                                          {report.manualCheckinsCount}
+                                        </td>
+                                        <td className="py-3.5 px-4 text-right">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedReportUser(report);
+                                            }}
+                                            className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-150 cursor-pointer min-h-[30px] ${
+                                              isSelected 
+                                                ? 'bg-blue-600 text-white shadow-sm' 
+                                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                            }`}
+                                          >
+                                            Inspect Log
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {attendanceReports.length === 0 && (
+                                    <tr>
+                                      <td colSpan={4} className="text-center py-8 text-slate-400">
+                                        No Level 1 or Level 2 field officials registered on the system.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Column 2: Log Inspector details panel */}
+                        <div className="lg:col-span-5 text-left">
+                          {selectedReportUser ? (
+                            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 space-y-5 shadow-xs">
+                              <div className="flex items-start justify-between border-b border-slate-200/60 pb-3">
+                                <div className="flex items-center space-x-3">
+                                  <img 
+                                    src={selectedReportUser.avatar} 
+                                    alt={selectedReportUser.name} 
+                                    className="w-11 h-11 rounded-xl object-cover border-2 border-blue-100" 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <div>
+                                    <h6 className="font-bold text-slate-950 text-sm leading-tight">{selectedReportUser.name}</h6>
+                                    <p className="text-[10px] text-slate-500 font-bold mt-0.5 uppercase tracking-wide">
+                                      {selectedReportUser.accessLevel === 'level_2' ? 'Level 2 • Zonal Officer' : 'Level 1 • Field Inspector'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-mono font-black text-[9px] border border-blue-100 shrink-0 self-start">
+                                  {selectedReportUser.totalLogsCount} Sessions
+                                </span>
+                              </div>
+
+                              <div className="space-y-3">
+                                <h6 className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                                  Live Duty Activity Log
+                                </h6>
+                                {selectedReportUser.logs.length === 0 ? (
+                                  <div className="text-center p-8 bg-white border border-slate-100 rounded-xl text-slate-400 text-xs">
+                                    No logged attendance/patrol activity records in memory cache.
+                                  </div>
+                                ) : (
+                                  <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1 scrollbar-thin">
+                                    {[...selectedReportUser.logs].reverse().map((log: any, idx: number) => (
+                                      <div key={idx} className="bg-white border border-slate-150 hover:border-slate-300 rounded-xl p-3.5 flex items-start justify-between gap-3 shadow-3xs transition-all duration-150">
+                                        <div className="flex items-start space-x-2.5">
+                                          <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${
+                                            log.type === 'manual_checkin' 
+                                              ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
+                                              : 'bg-blue-50 text-blue-600 border border-blue-100'
+                                          }`}>
+                                            {log.type === 'manual_checkin' ? <MapPin className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                                          </div>
+                                          <div className="text-left space-y-1">
+                                            <p className="font-bold text-slate-800 text-xs">
+                                              {log.type === 'manual_checkin' ? 'Patrol Check-In (Verified)' : 'App Engagement Session'}
+                                            </p>
+                                            <p className="text-[10px] text-slate-500 leading-normal">
+                                              Zone/Station: <strong className="font-semibold text-slate-700">{log.location}</strong>
+                                            </p>
+                                            {log.latitude && log.longitude && (
+                                              <p className="text-[9px] text-emerald-600 font-mono font-bold leading-none bg-emerald-50/50 px-1.5 py-0.5 rounded border border-emerald-100/30 inline-block">
+                                                📍 Coordinates: {log.latitude.toFixed(5)}°N, {log.longitude.toFixed(5)}°E
+                                              </p>
+                                            )}
+
+                                            {/* Admin: check-in / check-out status and duration details */}
+                                            {log.type === 'manual_checkin' && (
+                                              <div className="mt-1 flex flex-wrap gap-1.5 text-[9px] items-center">
+                                                <span className={`px-1.5 py-0.5 rounded-sm font-bold uppercase tracking-wider ${
+                                                  log.status === 'active' ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                                }`}>
+                                                  {log.status === 'active' ? '● Active Patrol' : '✓ Completed'}
+                                                </span>
+                                                {log.checkInTime && (
+                                                  <span className="text-slate-500">
+                                                    In: <strong>{new Date(log.checkInTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</strong>
+                                                  </span>
+                                                )}
+                                                {log.checkOutTime && (
+                                                  <span className="text-slate-500">
+                                                    Out: <strong>{new Date(log.checkOutTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</strong>
+                                                  </span>
+                                                )}
+                                              </div>
+                                            )}
+
+                                            {/* Admin: Patrol Summary Report */}
+                                            {log.patrolSummary && (
+                                              <div className="mt-1.5 p-2 bg-slate-50 rounded-lg border border-slate-150 text-[10px] text-slate-600 italic">
+                                                <strong className="text-slate-700 font-bold block not-italic text-[9px] uppercase tracking-wider text-emerald-700 mb-0.5">Submitted Shift Summary:</strong>
+                                                "{log.patrolSummary}"
+                                              </div>
+                                            )}
+
+                                            <div className="flex flex-wrap gap-1 mt-1.5">
+                                              <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[8px] font-bold">
+                                                Page: {log.pageOpened || 'Direct Dashboard'}
+                                              </span>
+                                              {(log.type !== 'manual_checkin' || log.status === 'completed') && (
+                                                <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[8px] font-bold">
+                                                  Duration: {log.durationMinutes || 5} mins
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            {/* Visited Modules */}
+                                            {log.pagesVisited && log.pagesVisited.length > 0 && (
+                                              <div className="mt-2 pt-2 border-t border-dashed border-slate-150">
+                                                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                                                  Visited modules
+                                                </p>
+                                                <div className="flex flex-wrap gap-1">
+                                                  {log.pagesVisited.map((p: string, pIdx: number) => (
+                                                    <span key={pIdx} className="bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded-md text-[8px] font-semibold border border-slate-150">
+                                                      {p}
+                                                    </span>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            )}
+
+                                            {/* Updates done during session */}
+                                            {log.updatesPerformed && log.updatesPerformed.length > 0 && (
+                                              <div className="mt-2 pt-2 border-t border-dashed border-slate-150">
+                                                <p className="text-[8px] font-bold text-blue-600 uppercase tracking-wider mb-1">
+                                                  Actions Authorized
+                                                </p>
+                                                <ul className="space-y-1">
+                                                  {log.updatesPerformed.map((u: string, uIdx: number) => (
+                                                    <li key={uIdx} className="text-[8px] text-blue-700 bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100/30 flex items-center gap-1 font-medium">
+                                                      <span className="w-1 h-1 rounded-full bg-blue-500 shrink-0 animate-pulse" />
+                                                      <span>{u}</span>
+                                                    </li>
+                                                  ))}
+                                                </ul>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                        
+                                        <div className="text-right shrink-0">
+                                          <p className="text-[9px] font-bold text-slate-800">
+                                            {new Date(log.timestamp).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                          </p>
+                                          <p className="text-[8px] text-slate-400 font-mono mt-0.5">
+                                            {new Date(log.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-10 text-center text-slate-400 text-xs flex flex-col items-center justify-center space-y-3 border-dashed">
+                              <div className="p-3 bg-white rounded-full border border-slate-200">
+                                <User className="w-6 h-6 text-slate-300" />
+                              </div>
+                              <p className="font-bold text-slate-600">No Officer Selected</p>
+                              <p className="text-[10px] text-slate-400 max-w-xs leading-relaxed">
+                                Select a registered field inspector or departmental official from the directory list on the left to review their timeline tracking, app engagement history, and geolocated patrols.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Additional GMC Security Guidance Block */}
+                <div className="bg-blue-50/60 border border-blue-100/80 rounded-2xl p-4 md:p-5 flex items-start space-x-3.5 text-xs text-slate-700 text-left">
+                  <Info className="w-4.5 h-4.5 text-blue-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1.5">
+                    <p className="font-bold text-blue-900 font-sans text-sm">Gwalior Municipal Corporation Clearance Protocols</p>
+                    <ul className="list-disc pl-4 space-y-1 text-slate-600 leading-relaxed text-[11px]">
+                      <li>
+                        <strong>Level 1 (Field Inspector):</strong> Assigned to ground workers. Empowered to record site status checklists, attach localized images, and provide dispatch comments.
+                      </li>
+                      <li>
+                        <strong>Level 2 (Department Head):</strong> Assigned to municipal division managers. Empowered to distribute tasks to inspectors and authorize status progression (e.g. In Progress, Resolved).
+                      </li>
+                      <li>
+                        <strong>Level 3 (Municipal Commissioner):</strong> High executive clearance. Ultimate oversight on system-wide verifications, user privilege assignments, and absolute audit metrics.
+                      </li>
                     </ul>
                   </div>
                 </div>
+              </motion.div>
+            )}
+
+            {/* User Profile Editing Modal */}
+            {isProfileEditModalOpen && currentUser && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              >
+                <motion.div
+                  initial={{ scale: 0.95, y: 15 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.95, y: 15 }}
+                  className="bg-white max-w-lg w-full rounded-3xl p-6 shadow-2xl border border-slate-200 space-y-5 flex flex-col max-h-[90vh] overflow-y-auto text-left"
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                        <Settings className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Edit Profile Details</h3>
+                        <p className="text-[10px] text-slate-400">Update your steward credentials in Gwalior Civic Registry</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsProfileEditModalOpen(false)}
+                      className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-xl transition cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Form fields */}
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    await handleSaveProfileSettings(e);
+                    setIsProfileEditModalOpen(false);
+                  }} className="space-y-4">
+                    
+                    {/* Photo Edit */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-500 block">Steward Profile Photo</label>
+                      <div className="flex items-center space-x-4 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                        <img 
+                          src={profileEditAvatar || currentUser.avatar} 
+                          alt="Avatar preview" 
+                          className="w-16 h-16 rounded-2xl object-cover border-2 border-slate-200 shadow-xs shrink-0"
+                        />
+                        <div className="flex-1 space-y-2 text-left">
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <select
+                              value={profileEditAvatar}
+                              onChange={(e) => setProfileEditAvatar(e.target.value)}
+                              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none text-slate-700 cursor-pointer font-bold flex-1 min-h-[44px]"
+                            >
+                              <option value="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80">Male Portrait (Priyansh)</option>
+                              <option value="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80">Female Portrait (Ananya)</option>
+                              <option value="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80">Male Portrait (Kabir)</option>
+                              <option value="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80">Silhouette Placeholder</option>
+                              {profileEditAvatar && !profileEditAvatar.startsWith('https://images.unsplash.com') && (
+                                <option value={profileEditAvatar}>Custom Uploaded Photo</option>
+                              )}
+                            </select>
+                            
+                            <label className="cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 hover:border-blue-300 font-extrabold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center space-x-1 shrink-0 min-h-[44px]">
+                              <Upload className="w-4 h-4" />
+                              <span>Upload</span>
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                className="hidden" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => {
+                                      if (typeof reader.result === 'string') {
+                                        setProfileEditAvatar(reader.result);
+                                      }
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Name Input */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-slate-500 block">Steward Display Name</label>
+                      <input 
+                        type="text"
+                        value={profileEditName}
+                        onChange={(e) => setProfileEditName(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800 min-h-[44px]"
+                        placeholder="Display name"
+                        required
+                      />
+                    </div>
+
+                    {/* Email Input */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-slate-500 block">Email ID (Mail)</label>
+                      <input 
+                        type="email"
+                        value={profileEditEmail}
+                        onChange={(e) => setProfileEditEmail(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800 min-h-[44px]"
+                        placeholder="Email address"
+                        required
+                      />
+                    </div>
+
+                    {/* Phone Input */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-slate-500 block">Registered Mobile Number</label>
+                      <input 
+                        type="text"
+                        value={profileEditPhone}
+                        onChange={(e) => setProfileEditPhone(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-semibold text-slate-800 min-h-[44px]"
+                        placeholder="+91 94251 12345"
+                        required
+                      />
+                    </div>
+
+                    {/* Primary Zone */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-slate-500 block">Primary Zone of Responsibility</label>
+                      <select 
+                        value={profileEditWard}
+                        onChange={(e) => setProfileEditWard(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-700 min-h-[44px]"
+                      >
+                        <option value="Lashkar Zone (Maharaj Bada)">Lashkar Zone (Maharaj Bada)</option>
+                        <option value="Morar Zone (Thatipur)">Morar Zone (Thatipur)</option>
+                        <option value="City Center Gwalior">City Center Gwalior</option>
+                        <option value="Fort & Old Town Area">Fort & Old Town Area</option>
+                        <option value="DD Nagar & Pinto Park">DD Nagar & Pinto Park</option>
+                      </select>
+                    </div>
+
+                    {/* Buttons */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsProfileEditModalOpen(false)}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs uppercase px-4 py-2.5 rounded-xl transition cursor-pointer min-h-[40px]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs uppercase px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer min-h-[40px]"
+                      >
+                        Save Changes
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
               </motion.div>
             )}
 
@@ -5737,10 +9112,10 @@ export default function App() {
           </button>
 
           <button 
-            onClick={() => { setActiveTab(currentUser?.role === 'admin' ? 'admin_panel' : 'profile'); setSelectedIssue(null); }}
+            onClick={() => { setActiveTab((currentUser?.role === 'admin' || (currentUser?.role === 'authority' && currentUser?.accessLevel === 'level_3')) ? 'admin_panel' : 'profile'); setSelectedIssue(null); }}
             className={`flex flex-col items-center space-y-1 text-[9px] font-extrabold transition-all duration-200 ${(activeTab === 'profile' || activeTab === 'admin_panel') ? 'text-orange-400 scale-105' : 'text-slate-400 hover:text-slate-200'}`}
           >
-            {currentUser?.role === 'admin' ? (
+            {(currentUser?.role === 'admin' || (currentUser?.role === 'authority' && currentUser?.accessLevel === 'level_3')) ? (
               <>
                 <Shield className={`w-5 h-5 ${activeTab === 'admin_panel' ? 'stroke-[2.5px]' : 'stroke-[1.8px]'}`} />
                 <span>Admin</span>
@@ -5757,6 +9132,381 @@ export default function App() {
 
         </>
       )}
+    </div>
+    );
+  };
+
+  if (isEmbedded) {
+    return (
+      <div className="flex flex-col min-h-screen w-full bg-slate-50 text-slate-800 font-sans overflow-x-hidden">
+        {renderAppContent()}
+      </div>
+    );
+  }
+
+  return (
+    <div id="civic-pulse-app" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-x-hidden md:overflow-hidden select-none">
+      
+      {/* 1. Desktop Layout (Android Simulator and Side Dashboard Controls) */}
+      <div className="hidden md:flex flex-1 w-full h-screen bg-slate-950 text-slate-100 items-stretch overflow-hidden relative">
+        {/* Animated ambient cosmic gradients */}
+        <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[radial-gradient(circle_at_top_right,rgba(249,115,22,0.15),transparent_40%),radial-gradient(circle_at_bottom_left,rgba(59,130,246,0.15),transparent_40%)] pointer-events-none"></div>
+
+        {/* Dynamic Bezel Sidebar Control Panel */}
+        <div className="w-[380px] bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between shrink-0 h-full overflow-y-auto">
+          <div className="space-y-6 text-left">
+            {/* Header */}
+            <div className="flex items-center space-x-3 pb-4 border-b border-slate-850">
+              <div className="bg-gradient-to-tr from-orange-500 to-amber-500 p-2 rounded-xl shadow-md shrink-0">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg font-black tracking-tight text-white leading-none font-display">My Gwalior</h1>
+                <p className="text-[10px] text-orange-400 font-extrabold uppercase tracking-widest mt-1">Civic Android Hub</p>
+              </div>
+            </div>
+
+            {/* PWA Section */}
+            <div className="space-y-3 bg-slate-950/40 p-4 rounded-2xl border border-slate-850">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
+                <h3 className="text-xs font-black uppercase text-slate-200 tracking-wider">Progressive Web App (PWA)</h3>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                This app is pre-configured with active Service Workers &amp; Web Manifest. Install now to run as a standalone application on your mobile device.
+              </p>
+              <button
+                onClick={() => {
+                  setSimNotification("Success: My Gwalior PWA has been downloaded and installed on your simulated device screen!");
+                  setShowSimNotification(true);
+                  alert("PWA Installation Triggered!\n\nThis simulator has registered the active Service Worker cache ('my-gwalior-civic-cache-v1'). On actual mobile phones or chrome desktops, the PWA 'Install App' prompt will appear on your browser bar!");
+                }}
+                className="w-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-extrabold text-[11px] py-2.5 px-4 rounded-xl shadow-md cursor-pointer hover:from-blue-500 hover:to-indigo-500 transition-all flex items-center justify-center space-x-1.5"
+              >
+                <PlusCircle className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Simulate App Installation</span>
+              </button>
+            </div>
+
+            {/* Interactive Settings Dashboard */}
+            <div className="space-y-4">
+              <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Device Emulator Settings</h3>
+              
+              {/* Bezel Color Customizer */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 flex justify-between">
+                  <span>Physical Bezel Finish</span>
+                  <span className="font-extrabold text-white capitalize">{simBezelColor}</span>
+                </label>
+                <div className="flex items-center space-x-2.5 bg-slate-950/30 p-2 rounded-xl border border-slate-850">
+                  {(['black', 'slate', 'indigo', 'emerald', 'gold'] as const).map((color) => (
+                    <button
+                      key={color}
+                      onClick={() => setSimBezelColor(color)}
+                      className={`w-6 h-6 rounded-full border-2 transition cursor-pointer ${
+                        color === 'black' ? 'bg-black border-zinc-700' :
+                        color === 'slate' ? 'bg-slate-600 border-slate-500' :
+                        color === 'indigo' ? 'bg-indigo-600 border-indigo-500' :
+                        color === 'emerald' ? 'bg-emerald-600 border-emerald-500' :
+                        'bg-yellow-500 border-yellow-400'
+                      } ${simBezelColor === color ? 'border-white scale-110 shadow-md' : 'border-transparent opacity-80 hover:opacity-100'}`}
+                      title={`${color} Bezel`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Simulated Battery Level */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
+                  <span>Simulate Battery Level</span>
+                  <span className={`font-black ${simBattery <= 15 ? 'text-red-500 animate-pulse' : 'text-slate-200'}`}>
+                    {simBattery}%
+                  </span>
+                </div>
+                <div className="bg-slate-950/30 p-2.5 rounded-xl border border-slate-850 flex items-center gap-3">
+                  <span className="text-[10px] text-slate-500 font-mono">5%</span>
+                  <input
+                    type="range"
+                    min="5"
+                    max="100"
+                    value={simBattery}
+                    onChange={(e) => setSimBattery(Number(e.target.value))}
+                    className="flex-1 accent-orange-500 h-1 bg-slate-800 rounded-lg cursor-pointer"
+                  />
+                  <span className="text-[10px] text-slate-500 font-mono">100%</span>
+                </div>
+              </div>
+
+              {/* Dynamic Network Emulator */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400">Emulate Network State</label>
+                <div className="grid grid-cols-3 gap-2 bg-slate-950/30 p-1 rounded-xl border border-slate-850">
+                  {(['5g', 'wifi', 'offline'] as const).map((net) => (
+                    <button
+                      key={net}
+                      onClick={() => {
+                        setSimNetwork(net);
+                        if (net === 'offline') {
+                          setSimNotification("System: Device has entered offline mode. Offline service worker caching demonstration active.");
+                          setShowSimNotification(true);
+                        } else {
+                          setSimNotification(`System: Connected to ${net.toUpperCase()} network.`);
+                          setShowSimNotification(true);
+                        }
+                      }}
+                      className={`py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition cursor-pointer ${
+                        simNetwork === net
+                          ? 'bg-slate-800 text-white shadow-sm'
+                          : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {net}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* GPS Neighborhood Emulator */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
+                  <span>GPS Location Emulator</span>
+                  <span className="text-[9px] font-black text-orange-400 truncate max-w-[180px]">{simLocationName}</span>
+                </div>
+                <div className="space-y-1.5 bg-slate-950/30 p-2 rounded-xl border border-slate-850">
+                  {[
+                    { name: 'Maharaj Bada (Town Hall)', lat: 26.2045, lng: 78.1610 },
+                    { name: 'Gwalior Fort (Historic)', lat: 26.2307, lng: 78.1691 },
+                    { name: 'City Centre (Corporate)', lat: 26.2163, lng: 78.1874 },
+                    { name: 'Thatipur (Residential)', lat: 26.2120, lng: 78.2040 }
+                  ].map((loc) => (
+                    <button
+                      key={loc.name}
+                      onClick={() => {
+                        setSimLocationName(loc.name);
+                        setReportLat(loc.lat);
+                        setReportLng(loc.lng);
+                        setSimNotification(`GPS Updated: Coordinates set to ${loc.name} (${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)})`);
+                        setShowSimNotification(true);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition cursor-pointer flex justify-between items-center ${
+                        simLocationName === loc.name ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'text-slate-400 hover:bg-slate-800/30 border border-transparent'
+                      }`}
+                    >
+                      <span>📍 {loc.name}</span>
+                      <span className="text-[8px] font-mono opacity-60">
+                        {loc.lat.toFixed(2)}°N
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Trigger Simulated Notification */}
+              <button
+                onClick={() => {
+                  const messages = [
+                    "Nagar Nigam: Road complaint at Thatipur is in-progress.",
+                    "Swachhata GMC: Garbage dump Maharaj Bada successfully cleared!",
+                    "Water Dept: High-pressure leak at Lashkar is under maintenance.",
+                    "Emergency Notice: High rain alerts issued for low-lying wards."
+                  ];
+                  const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+                  setSimNotification(randomMsg);
+                  setShowSimNotification(true);
+                }}
+                className="w-full bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-750 text-[10px] font-extrabold py-2 px-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-1.5 shadow-sm"
+              >
+                <span>🔔 Simulate GMC Admin Alert</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Footer of Sidebar */}
+          <div className="pt-4 border-t border-slate-850 text-left">
+            <div className="flex items-center space-x-2 text-[10px] font-semibold text-slate-500">
+              <Shield className="w-3.5 h-3.5 text-slate-500" />
+              <span>GMC Digital Sandbox v2.8</span>
+            </div>
+            <p className="text-[9px] text-slate-600 mt-1">Simulating native Android core runtime context and PWA capabilities.</p>
+          </div>
+        </div>
+
+        {/* Center: Simulated Android Phone Device Layout */}
+        <div className="flex-1 flex flex-col justify-center items-center p-4 relative overflow-hidden bg-slate-950">
+          
+          {/* Subtle concentric decorative scanner lines */}
+          <div className="absolute w-[800px] h-[800px] rounded-full border border-slate-800/20 pointer-events-none"></div>
+          <div className="absolute w-[600px] h-[600px] rounded-full border border-slate-800/30 pointer-events-none"></div>
+
+          {/* Side Physical Buttons (Power & Volume) */}
+          <div className="relative">
+            
+            {/* Volume Up */}
+            <button 
+              onClick={() => {
+                setSimVolume(v => Math.min(100, v + 10));
+                setShowVolumeHud(true);
+                setTimeout(() => setShowVolumeHud(false), 2000);
+              }}
+              className="absolute right-[-16px] top-[140px] w-1.5 h-10 bg-slate-800 rounded-r-md border-r border-slate-700 shadow-sm hover:brightness-110 cursor-pointer"
+              title="Volume Up"
+            />
+            {/* Volume Down */}
+            <button 
+              onClick={() => {
+                setSimVolume(v => Math.max(0, v - 10));
+                setShowVolumeHud(true);
+                setTimeout(() => setShowVolumeHud(false), 2000);
+              }}
+              className="absolute right-[-16px] top-[195px] w-1.5 h-10 bg-slate-800 rounded-r-md border-r border-slate-700 shadow-sm hover:brightness-110 cursor-pointer"
+              title="Volume Down"
+            />
+            {/* Power Button */}
+            <button 
+              onClick={() => setSimIsLocked(l => !l)}
+              className="absolute right-[-16px] top-[270px] w-1.5 h-12 bg-slate-800 rounded-r-md border-r border-slate-700 shadow-sm hover:brightness-110 cursor-pointer"
+              title="Toggle Power/Sleep"
+            />
+
+            {/* The Physical Bezel Frame */}
+            <div 
+              className={`w-[395px] h-[815px] rounded-[52px] p-3 flex flex-col relative transition-all duration-300 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] border-[10px] ${
+                simBezelColor === 'black' ? 'bg-zinc-950 border-zinc-900 ring-4 ring-zinc-850' :
+                simBezelColor === 'slate' ? 'bg-slate-900 border-slate-800 ring-4 ring-slate-750' :
+                simBezelColor === 'indigo' ? 'bg-indigo-950 border-indigo-900 ring-4 ring-indigo-850' :
+                simBezelColor === 'emerald' ? 'bg-emerald-950 border-emerald-900 ring-4 ring-emerald-850' :
+                'bg-amber-950 border-amber-900 ring-4 ring-amber-850'
+              }`}
+            >
+              {/* Phone Speaker & Punch Hole Camera (Notch Area) */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-zinc-950 rounded-b-2xl z-50 flex items-center justify-center gap-2">
+                <div className="w-10 h-1 bg-zinc-800 rounded-full"></div>
+                <div className="w-2.5 h-2.5 bg-zinc-900 rounded-full border border-zinc-800 flex items-center justify-center">
+                  <div className="w-1 h-1 bg-blue-900 rounded-full"></div>
+                </div>
+              </div>
+
+              {/* Simulated Screen Viewport Area */}
+              <div className="flex-1 rounded-[42px] overflow-hidden bg-slate-50 text-slate-800 flex flex-col relative shadow-inner">
+                
+                {/* 1. Real-time Android Status Bar Overlay */}
+                <div className="h-6.5 bg-slate-950 text-white text-[10px] font-black px-5 flex items-center justify-between shrink-0 select-none z-50 relative">
+                  <div>{simTime}</div>
+                  <div className="flex items-center space-x-1.5">
+                    {/* Simulated Network Icons */}
+                    {simNetwork === '5g' && <span className="font-sans text-[8px] tracking-tighter bg-blue-600/20 text-blue-400 px-1 py-0.2 rounded font-black">5G</span>}
+                    {simNetwork === 'wifi' && <span className="font-sans text-[8px] tracking-tighter bg-emerald-600/20 text-emerald-400 px-1 py-0.2 rounded font-black">WI-FI</span>}
+                    {simNetwork === 'offline' && <span className="font-sans text-[8px] tracking-tighter bg-red-600/20 text-red-400 px-1 py-0.2 rounded font-black">OFFLINE</span>}
+                    
+                    {/* Signal bars */}
+                    <div className="flex items-end space-x-0.5 h-2.5">
+                      <div className="w-0.5 h-1 bg-white opacity-80"></div>
+                      <div className="w-0.5 h-1.5 bg-white opacity-80"></div>
+                      <div className={`w-0.5 h-2 ${simNetwork !== 'offline' ? 'bg-white' : 'bg-white/30'}`}></div>
+                      <div className={`w-0.5 h-2.5 ${simNetwork !== 'offline' ? 'bg-white' : 'bg-white/30'}`}></div>
+                    </div>
+
+                    {/* Battery Icon */}
+                    <div className="flex items-center space-x-0.5">
+                      <span className="text-[8px] text-slate-300 font-mono">{simBattery}%</span>
+                      <div className="w-5.5 h-2.8 border border-white/50 rounded-xs p-0.5 flex items-stretch">
+                        <div 
+                          className={`rounded-3xs ${
+                            simBattery <= 15 ? 'bg-red-500 animate-pulse' :
+                            simBattery <= 35 ? 'bg-orange-500' : 'bg-green-400'
+                          }`}
+                          style={{ width: `${simBattery}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Interactive Volume HUD Pop-up */}
+                {showVolumeHud && (
+                  <div className="absolute right-3 top-10 bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-2xl p-3 shadow-xl z-50 flex flex-col items-center space-y-2 w-10 text-white animate-fade-in">
+                    <span className="text-[8px] font-black uppercase text-slate-400">Vol</span>
+                    <div className="h-20 w-1.5 bg-slate-800 rounded-full relative overflow-hidden">
+                      <div className="absolute bottom-0 left-0 w-full bg-blue-500 rounded-full" style={{ height: `${simVolume}%` }}></div>
+                    </div>
+                    <span className="text-[8px] font-mono">{simVolume}%</span>
+                  </div>
+                )}
+
+                {/* 3. Drop-down Android Notification Hub overlay */}
+                {simNotification && showSimNotification && (
+                  <div className="absolute top-8 left-3 right-3 bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl p-3.5 shadow-xl z-50 text-white flex items-start space-x-3 text-left">
+                    <div className="p-2 bg-gradient-to-tr from-orange-500 to-amber-500 text-white rounded-xl shrink-0">
+                      <Sparkles className="w-4 h-4 text-white animate-pulse" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[9px] font-black text-orange-400 uppercase tracking-wider">Simulated Notification</span>
+                        <span className="text-[8px] text-slate-500">just now</span>
+                      </div>
+                      <p className="text-[10px] text-slate-200 mt-1 font-semibold leading-relaxed">{simNotification}</p>
+                    </div>
+                    <button 
+                      onClick={() => setShowSimNotification(false)}
+                      className="text-slate-500 hover:text-white font-black cursor-pointer text-xs"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+
+                {/* 4. Sleek Simulated Power Screen Lock Mode */}
+                {simIsLocked ? (
+                  <div className="absolute inset-0 bg-slate-950 z-[999] flex flex-col justify-center items-center text-white p-6 space-y-4 animate-fade-in select-none">
+                    <div className="text-center space-y-1">
+                      <p className="text-4xl font-extrabold tracking-tight">{simTime.split(' ')[0]}</p>
+                      <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
+                    </div>
+                    
+                    <div className="p-4 bg-slate-900/50 rounded-2xl border border-white/5 w-full max-w-[280px] text-center space-y-3">
+                      <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">Swipe or click below to wake screen and interact with My Gwalior.</p>
+                      <button 
+                        onClick={() => setSimIsLocked(false)}
+                        className="mx-auto px-4 py-2 bg-gradient-to-tr from-orange-500 to-amber-500 text-white text-[10px] font-black uppercase tracking-wider rounded-xl cursor-pointer shadow-md"
+                      >
+                        🔓 Unlock Device
+                      </button>
+                    </div>
+
+                    <div className="pt-8 text-[9px] text-slate-600 flex items-center gap-1">
+                      <Shield className="w-3 h-3 text-slate-700" />
+                      <span>Security clearance bypass enabled</span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* 5. Actual Application Rendering Frame */}
+                <div className="flex-1 overflow-hidden relative flex flex-col bg-slate-50">
+                  <iframe
+                    id="simulator-iframe"
+                    src="/?embed=true"
+                    className="w-full h-full border-none"
+                    title="My Gwalior Simulator Frame"
+                  />
+                </div>
+
+                {/* 6. Virtual Android Bottom Gesture navigation pill */}
+                <div className="h-5 bg-slate-950 flex items-center justify-center shrink-0 select-none z-50">
+                  <div className="w-24 h-1 bg-white/45 rounded-full hover:bg-white/80 cursor-pointer transition-all" onClick={() => { setActiveTab('feed'); setSelectedIssue(null); }} title="Go to Issues Feed" />
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Mobile Layout (Native full-screen on smartphones under md:) */}
+      <div className="md:hidden flex flex-col min-h-screen w-full bg-slate-50 text-slate-800 font-sans overflow-x-hidden">
+        {renderAppContent()}
+      </div>
+
     </div>
   );
 }

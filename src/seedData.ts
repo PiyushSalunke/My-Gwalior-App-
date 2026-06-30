@@ -17,7 +17,9 @@ export const DEMO_USERS: UserProfile[] = [
     resolvedCount: 4,
     role: 'authority',
     verificationStatus: 'verified',
-    accessLevel: 'level_3'
+    accessLevel: 'level_3',
+    department: 'admin',
+    authorityLevel: 'commissioner'
   },
   {
     uid: 'user_2',
@@ -124,7 +126,103 @@ export const DEMO_USERS: UserProfile[] = [
     resolvedCount: 1,
     role: 'authority',
     verificationStatus: 'pending',
-    accessLevel: 'none'
+    accessLevel: 'none',
+    department: 'garbage',
+    authorityLevel: 'field_officer'
+  },
+  {
+    uid: 'user_l1_1',
+    name: 'Rajesh Gwalior (Water Inspector)',
+    email: 'rajesh.water@gwaliorcity.gov.in',
+    password: 'authority',
+    avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80',
+    points: 120,
+    badges: [
+      { id: 'b3', title: 'Water Guardian', description: 'Resolved 3 water leak issues', icon: 'Shield', unlockedAt: '2026-06-20T10:00:00Z', color: 'from-blue-400 to-teal-500' }
+    ],
+    reportedCount: 1,
+    verifiedCount: 8,
+    resolvedCount: 4,
+    role: 'authority',
+    verificationStatus: 'verified',
+    accessLevel: 'level_1',
+    department: 'water',
+    authorityLevel: 'inspector',
+    attendanceLogs: [
+      { timestamp: '2026-06-26T09:15:22.000Z', type: 'app_open', location: 'Lashkar Zone Office', latitude: 26.2183, longitude: 78.1828, pageOpened: 'Feed & Issues Board', durationMinutes: 12 },
+      { timestamp: '2026-06-26T09:30:15.000Z', type: 'manual_checkin', location: 'Maharaj Bada Market Square', latitude: 26.2181, longitude: 78.1825, pageOpened: 'Feed & Issues Board', durationMinutes: 25 },
+      { timestamp: '2026-06-27T08:55:00.000Z', type: 'app_open', location: 'Morar Ward Office', latitude: 26.2150, longitude: 78.2120, pageOpened: 'Interactive Civic Map', durationMinutes: 8 },
+      { timestamp: '2026-06-28T09:05:10.000Z', type: 'app_open', location: 'Lashkar Zone Office', latitude: 26.2183, longitude: 78.1828, pageOpened: 'Inter-Department Chat', durationMinutes: 15 }
+    ]
+  },
+  {
+    uid: 'user_l1_2',
+    name: 'Sunil Tomar (Light Inspector)',
+    email: 'sunil.light@gwaliorcity.gov.in',
+    password: 'authority',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    points: 95,
+    badges: [],
+    reportedCount: 0,
+    verifiedCount: 4,
+    resolvedCount: 2,
+    role: 'authority',
+    verificationStatus: 'verified',
+    accessLevel: 'level_1',
+    department: 'light',
+    authorityLevel: 'inspector',
+    attendanceLogs: [
+      { timestamp: '2026-06-25T08:42:11.000Z', type: 'app_open', location: 'DD Nagar Sector', latitude: 26.2420, longitude: 78.2190, pageOpened: 'Feed & Issues Board', durationMinutes: 6 },
+      { timestamp: '2026-06-26T08:50:00.000Z', type: 'app_open', location: 'Pinto Park Ward', latitude: 26.2415, longitude: 78.2185, pageOpened: 'Citizen Leaderboard', durationMinutes: 14 },
+      { timestamp: '2026-06-27T09:01:45.000Z', type: 'app_open', location: 'City Center Hub', latitude: 26.1960, longitude: 78.1960, pageOpened: 'Interactive Civic Map', durationMinutes: 9 },
+      { timestamp: '2026-06-27T09:10:00.000Z', type: 'manual_checkin', location: 'Pinto Park Circle', latitude: 26.2425, longitude: 78.2200, pageOpened: 'Interactive Civic Map', durationMinutes: 18 }
+    ]
+  },
+  {
+    uid: 'user_l2_1',
+    name: 'Vivek Dixit (Zonal Chief)',
+    email: 'vivek.dixit@gwaliorcity.gov.in',
+    password: 'authority',
+    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+    points: 180,
+    badges: [
+      { id: 'b2', title: 'Gwalior Gaurav', description: 'Assigned and managed over 50 ward tickets', icon: 'Award', unlockedAt: '2026-05-15T12:00:00Z', color: 'from-blue-400 to-indigo-600' }
+    ],
+    reportedCount: 2,
+    verifiedCount: 15,
+    resolvedCount: 10,
+    role: 'authority',
+    verificationStatus: 'verified',
+    accessLevel: 'level_2',
+    department: 'road',
+    authorityLevel: 'chief_engineer',
+    attendanceLogs: [
+      { timestamp: '2026-06-26T10:02:15.000Z', type: 'app_open', location: 'Gwalior Fort Zone HQ', latitude: 26.2280, longitude: 78.1710, pageOpened: 'Admin Control Center', durationMinutes: 45 },
+      { timestamp: '2026-06-27T10:15:30.000Z', type: 'app_open', location: 'Gwalior Fort Zone HQ', latitude: 26.2280, longitude: 78.1710, pageOpened: 'Admin Control Center', durationMinutes: 30 },
+      { timestamp: '2026-06-28T09:45:11.000Z', type: 'app_open', location: 'Morar Zone HQ', latitude: 26.2150, longitude: 78.2120, pageOpened: 'Feed & Issues Board', durationMinutes: 20 }
+    ]
+  },
+  {
+    uid: 'user_l2_2',
+    name: 'Amit Bhadoria (SWM Head)',
+    email: 'amit.bhadoria@gwaliorcity.gov.in',
+    password: 'authority',
+    avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80',
+    points: 210,
+    badges: [],
+    reportedCount: 3,
+    verifiedCount: 12,
+    resolvedCount: 9,
+    role: 'authority',
+    verificationStatus: 'verified',
+    accessLevel: 'level_2',
+    department: 'garbage',
+    authorityLevel: 'superintendent',
+    attendanceLogs: [
+      { timestamp: '2026-06-25T09:00:00.000Z', type: 'app_open', location: 'Nagar Nigam HQ', latitude: 26.2215, longitude: 78.1685, pageOpened: 'Feed & Issues Board', durationMinutes: 15 },
+      { timestamp: '2026-06-26T09:12:00.000Z', type: 'app_open', location: 'Nagar Nigam HQ', latitude: 26.2215, longitude: 78.1685, pageOpened: 'Admin Control Center', durationMinutes: 22 },
+      { timestamp: '2026-06-27T08:58:19.000Z', type: 'app_open', location: 'City Center SWM Station', latitude: 26.1960, longitude: 78.1960, pageOpened: 'Interactive Civic Map', durationMinutes: 11 }
+    ]
   },
   {
     uid: 'user_admin',
@@ -141,7 +239,9 @@ export const DEMO_USERS: UserProfile[] = [
     resolvedCount: 0,
     role: 'admin',
     verificationStatus: 'verified',
-    accessLevel: 'level_3'
+    accessLevel: 'level_3',
+    department: 'admin',
+    authorityLevel: 'commissioner'
   }
 ];
 

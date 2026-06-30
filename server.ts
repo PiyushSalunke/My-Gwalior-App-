@@ -1,13 +1,9 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { GoogleGenAI, Type } from '@google/genai';
 import { CivicIssue, UserProfile, Comment, StatusTimelineEvent, AIAgentAnalysis, IssueCategory, IssueSeverity, IssueStatus } from './src/types';
 import { SEED_ISSUES, DEMO_USERS, getInitialImpactStats } from './src/seedData';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
@@ -15,7 +11,7 @@ const port = 3000;
 app.use(express.json({ limit: '50mb' }));
 
 // Local JSON file path for database persistence
-const DATA_FILE = path.join(__dirname, 'data.json');
+const DATA_FILE = path.join(process.cwd(), 'data.json');
 
 // Memory storage cache
 let db: {
@@ -68,7 +64,12 @@ function loadData() {
       resolvedCount: 0,
       role: 'admin',
       verificationStatus: 'verified',
-      accessLevel: 'level_3'
+      accessLevel: 'level_3',
+      phone: '+91 94251 12345',
+      phoneVerified: true,
+      emailVerified: true,
+      department: 'admin',
+      authorityLevel: 'commissioner'
     };
     db.users.push(adminUser);
     saveData();
@@ -80,17 +81,53 @@ function loadData() {
     adminUser.role = 'admin';
     adminUser.verificationStatus = 'verified';
     adminUser.accessLevel = 'level_3';
+    adminUser.phone = '+91 94251 12345';
+    adminUser.phoneVerified = true;
+    adminUser.emailVerified = true;
+    adminUser.department = 'admin';
+    adminUser.authorityLevel = 'commissioner';
     saveData();
   }
 
-  // Synchronize db.users with DEMO_USERS to make sure any new users are added
+  // Synchronize db.users with DEMO_USERS to make sure any new users are added or synchronized
   let updated = false;
   DEMO_USERS.forEach(demoUser => {
-    if (!db.users.some(u => u.uid === demoUser.uid || u.email === demoUser.email)) {
+    const existing = db.users.find(u => u.uid === demoUser.uid || u.email === demoUser.email);
+    if (!existing) {
       db.users.push(demoUser);
+      updated = true;
+    } else {
+      // Sync department and authorityLevel if missing
+      if (demoUser.department && !existing.department) {
+        existing.department = demoUser.department;
+        updated = true;
+      }
+      if (demoUser.authorityLevel && !existing.authorityLevel) {
+        existing.authorityLevel = demoUser.authorityLevel;
+        updated = true;
+      }
+    }
+  });
+
+  // Backward compatibility for any other authority users who might lack department/level in cache
+  db.users.forEach(u => {
+    if ((u.role === 'authority' || u.role === 'admin') && (!u.department || !u.authorityLevel)) {
+      if (!u.department) {
+        if (u.name.toLowerCase().includes('water')) u.department = 'water';
+        else if (u.name.toLowerCase().includes('light')) u.department = 'light';
+        else if (u.name.toLowerCase().includes('garbage') || u.name.toLowerCase().includes('swm')) u.department = 'garbage';
+        else if (u.name.toLowerCase().includes('road')) u.department = 'road';
+        else u.department = 'health';
+      }
+      if (!u.authorityLevel) {
+        if (u.accessLevel === 'level_3') u.authorityLevel = 'commissioner';
+        else if (u.accessLevel === 'level_2') u.authorityLevel = 'superintendent';
+        else u.authorityLevel = 'inspector';
+      }
       updated = true;
     }
   });
+
   if (updated) {
     saveData();
   }
@@ -105,6 +142,42 @@ function saveData() {
 }
 
 loadData();
+
+// Ensure PWA icons are downloaded to /public
+async function ensurePWAIcons() {
+  const publicDir = path.join(process.cwd(), 'public');
+  if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
+  }
+
+  const filesToDownload = [
+    { name: 'icon-512.png', url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=512&h=512&fit=crop&q=90' },
+    { name: 'icon-192.png', url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=192&h=192&fit=crop&q=90' }
+  ];
+
+  for (const item of filesToDownload) {
+    const filePath = path.join(publicDir, item.name);
+    if (!fs.existsSync(filePath)) {
+      try {
+        console.log(`[PWA setup] Downloading ${item.name}...`);
+        const res = await fetch(item.url);
+        if (res.ok) {
+          const buffer = await res.arrayBuffer();
+          fs.writeFileSync(filePath, Buffer.from(buffer));
+          console.log(`[PWA setup] Successfully saved ${item.name}`);
+        } else {
+          console.warn(`[PWA setup] Failed to download ${item.name}: ${res.statusText}`);
+        }
+      } catch (error) {
+        console.error(`[PWA setup] Error downloading ${item.name}:`, error);
+      }
+    }
+  }
+}
+
+ensurePWAIcons().catch(err => {
+  console.error('[PWA setup] Failed to run icon preloader:', err);
+});
 
 // Initialize GoogleGenAI server-side
 const apiKey = process.env.GEMINI_API_KEY;
@@ -206,6 +279,43 @@ async function resolveMediaInput(input: string, defaultMimeType: string = 'image
   return { base64Data: input, mimeType: defaultMimeType };
 }
 
+// Helper to call Gemini models with robust fallback mechanism in case of high demand (503)
+async function generateContentWithFallback(params: any): Promise<any> {
+  if (!aiClient) {
+    throw new Error('aiClient is not initialized');
+  }
+
+  // Define fallback models to try in order of preference
+  const fallbackModels = [
+    'gemini-3.5-flash',
+    'gemini-flash-latest',
+    'gemini-3.1-flash-lite'
+  ];
+
+  const initialModel = params.model || 'gemini-3.5-flash';
+  const uniqueModels = Array.from(new Set([initialModel, ...fallbackModels]));
+
+  let lastError: any = null;
+
+  for (const model of uniqueModels) {
+    try {
+      console.log(`[Gemini client] Attempting content generation with model: ${model}`);
+      const currentParams = { ...params, model };
+      const response = await aiClient.models.generateContent(currentParams);
+      if (response && response.text) {
+        console.log(`[Gemini client] Successfully generated content with model: ${model}`);
+        return response;
+      }
+      throw new Error(`Invalid response or empty text from model ${model}`);
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Gemini client] Model ${model} failed:`, err?.message || err);
+    }
+  }
+
+  throw lastError || new Error('All fallback models failed to generate content');
+}
+
 // -------------------------------------------------------------
 // Gemini Multi-Agent AI Pipeline
 // -------------------------------------------------------------
@@ -252,7 +362,7 @@ async function runAIPipeline(
         }
       `;
 
-      const visionResponse = await aiClient.models.generateContent({
+      const visionResponse = await generateContentWithFallback({
         model: 'gemini-3.5-flash',
         contents: { parts: [imagePart, { text: visionPrompt }] },
         config: {
@@ -313,7 +423,7 @@ async function runAIPipeline(
           }
         `;
 
-        const duplicateResponse = await aiClient.models.generateContent({
+        const duplicateResponse = await generateContentWithFallback({
           model: 'gemini-3.5-flash',
           contents: duplicatePrompt,
           config: {
@@ -361,7 +471,7 @@ async function runAIPipeline(
         }
       `;
 
-      const priorityResponse = await aiClient.models.generateContent({
+      const priorityResponse = await generateContentWithFallback({
         model: 'gemini-3.5-flash',
         contents: priorityPrompt,
         config: {
@@ -395,7 +505,7 @@ async function runAIPipeline(
         }
       `;
 
-      const routingResponse = await aiClient.models.generateContent({
+      const routingResponse = await generateContentWithFallback({
         model: 'gemini-3.5-flash',
         contents: routingPrompt,
         config: {
@@ -429,7 +539,7 @@ async function runAIPipeline(
         }
       `;
 
-      const predictiveResponse = await aiClient.models.generateContent({
+      const predictiveResponse = await generateContentWithFallback({
         model: 'gemini-3.5-flash',
         contents: historyPrompt,
         config: {
@@ -828,7 +938,7 @@ app.post('/api/issues/:id/confirm', (req, res) => {
 // 4. Update status (simulate official action)
 app.post('/api/issues/:id/status', (req, res) => {
   const { id } = req.params;
-  const { status, updaterName, description, imageUrl } = req.body;
+  const { status, updaterName, description, imageUrl, userId } = req.body;
 
   const issue = db.issues.find(i => i.id === id);
   if (!issue) {
@@ -868,6 +978,11 @@ app.post('/api/issues/:id/status', (req, res) => {
     }
   }
 
+  // Record action performed by official
+  if (userId) {
+    recordUserAction(userId, `Updated issue "${issue.title}" status to "${status}"`);
+  }
+
   saveData();
   res.json(issue);
 });
@@ -899,6 +1014,11 @@ app.post('/api/issues/:id/comments', (req, res) => {
   const user = db.users.find(u => u.uid === userId);
   if (user) {
     user.points += 5;
+  }
+
+  // Record action performed by official
+  if (userId) {
+    recordUserAction(userId, `Added comment on issue "${issue.title}"`);
   }
 
   saveData();
@@ -961,7 +1081,7 @@ app.get('/api/users/:uid', (req, res) => {
 
 // Update profile details
 app.post('/api/users/profile', (req, res) => {
-  const { uid, name, avatar, email, password } = req.body;
+  const { uid, name, avatar, email, password, phone, phoneVerified, emailVerified, department, authorityLevel } = req.body;
   let user = db.users.find(u => u.uid === uid);
 
   if (!user) {
@@ -978,7 +1098,12 @@ app.post('/api/users/profile', (req, res) => {
       resolvedCount: 0,
       role: req.body.role || 'citizen',
       verificationStatus: req.body.verificationStatus || 'none',
-      accessLevel: req.body.accessLevel || 'none'
+      accessLevel: req.body.accessLevel || 'none',
+      phone: phone || '',
+      phoneVerified: phoneVerified || false,
+      emailVerified: emailVerified || false,
+      department: department || undefined,
+      authorityLevel: authorityLevel || undefined
     };
     db.users.push(user);
   } else {
@@ -989,6 +1114,11 @@ app.post('/api/users/profile', (req, res) => {
     if (req.body.role) user.role = req.body.role;
     if (req.body.verificationStatus) user.verificationStatus = req.body.verificationStatus;
     if (req.body.accessLevel) user.accessLevel = req.body.accessLevel;
+    if (phone !== undefined) user.phone = phone;
+    if (phoneVerified !== undefined) user.phoneVerified = phoneVerified;
+    if (emailVerified !== undefined) user.emailVerified = emailVerified;
+    if (department !== undefined) user.department = department;
+    if (authorityLevel !== undefined) user.authorityLevel = authorityLevel;
   }
 
   saveData();
@@ -997,7 +1127,7 @@ app.post('/api/users/profile', (req, res) => {
 
 // Admin endpoint to verify and assign access level to authorities
 app.post('/api/admin/verify-user', (req, res) => {
-  const { uid, verificationStatus, accessLevel } = req.body;
+  const { uid, verificationStatus, accessLevel, role, department, authorityLevel } = req.body;
   const user = db.users.find(u => u.uid === uid);
 
   if (!user) {
@@ -1010,9 +1140,218 @@ app.post('/api/admin/verify-user', (req, res) => {
   if (accessLevel) {
     user.accessLevel = accessLevel;
   }
+  if (role) {
+    user.role = role;
+  }
+  if (department !== undefined) {
+    user.department = department;
+  }
+  if (authorityLevel !== undefined) {
+    user.authorityLevel = authorityLevel;
+  }
 
   saveData();
   res.json({ success: true, user });
+});
+
+// Helper to record actions/updates performed by an official in their active session log
+function recordUserAction(userId: string | undefined, actionText: string) {
+  if (!userId) return;
+  const user = db.users.find(u => u.uid === userId);
+  if (user && user.attendanceLogs && user.attendanceLogs.length > 0) {
+    // Find the latest 'app_open' log representing the active session
+    const lastLog = [...user.attendanceLogs]
+      .reverse()
+      .find(l => l.type === 'app_open');
+    if (lastLog) {
+      lastLog.updatesPerformed = lastLog.updatesPerformed || [];
+      if (!lastLog.updatesPerformed.includes(actionText)) {
+        lastLog.updatesPerformed.push(actionText);
+        saveData();
+      }
+    }
+  }
+}
+
+// Authority Attendance - Check-in or Log App Open
+app.post('/api/users/:uid/attendance', (req, res) => {
+  const { uid } = req.params;
+  const { type, location, device, latitude, longitude, pageOpened, durationMinutes, sessionId, actionDone, patrolSummary } = req.body;
+  const user = db.users.find(u => u.uid === uid);
+
+  if (!user) {
+    return res.status(404).json({ error: 'User profile not found.' });
+  }
+
+  // Ensure only authorities and admins are allowed to register attendance
+  if (user.role !== 'authority' && user.role !== 'admin') {
+    return res.status(403).json({ error: 'Attendance registration is strictly reserved for Gwalior authorities.' });
+  }
+
+  if (!user.attendanceLogs) {
+    user.attendanceLogs = [];
+  }
+
+  const now = new Date();
+
+  // If manual checkout is requested, find the active check-in and close it
+  if (type === 'manual_checkout') {
+    const activeCheckIn = [...user.attendanceLogs]
+      .reverse()
+      .find(log => log.type === 'manual_checkin' && log.status !== 'completed');
+
+    if (activeCheckIn) {
+      activeCheckIn.status = 'completed';
+      activeCheckIn.checkOutTime = now.toISOString();
+      
+      const checkInTime = new Date(activeCheckIn.checkInTime || activeCheckIn.timestamp);
+      const elapsedMs = now.getTime() - checkInTime.getTime();
+      const elapsedMins = Math.max(1, Math.round(elapsedMs / 60000));
+      
+      activeCheckIn.durationMinutes = elapsedMins;
+      if (patrolSummary) {
+        activeCheckIn.patrolSummary = patrolSummary;
+      }
+      if (actionDone) {
+        activeCheckIn.updatesPerformed = activeCheckIn.updatesPerformed || [];
+        if (!activeCheckIn.updatesPerformed.includes(actionDone)) {
+          activeCheckIn.updatesPerformed.push(actionDone);
+        }
+      }
+      
+      saveData();
+      return res.json({ success: true, updated: true, logs: user.attendanceLogs, user });
+    } else {
+      // Fallback: Create a direct checkout log
+      const checkoutLog: any = {
+        timestamp: now.toISOString(),
+        type: 'manual_checkout',
+        location: location || 'Gwalior Nagar Nigam Office',
+        device: device || 'GMC Patrol App',
+        pageOpened: pageOpened || 'Duty Desk',
+        durationMinutes: durationMinutes || 0,
+        latitude: latitude || 26.2183,
+        longitude: longitude || 78.1828,
+        sessionId: sessionId || `sess_${Date.now()}`,
+        pagesVisited: ['Duty Desk'],
+        updatesPerformed: actionDone ? [actionDone] : [],
+        checkOutTime: now.toISOString(),
+        patrolSummary: patrolSummary || 'Duty Completed',
+        status: 'completed'
+      };
+      user.attendanceLogs.push(checkoutLog);
+      saveData();
+      return res.json({ success: true, logs: user.attendanceLogs, user });
+    }
+  }
+
+  // If a sessionId is passed, we check if this session is already logged
+  if (type === 'app_open' && sessionId) {
+    const existingSessionLog = user.attendanceLogs.find(
+      log => log.type === 'app_open' && log.sessionId === sessionId
+    );
+
+    if (existingSessionLog) {
+      // Update the existing session log (preventing double counting)
+      existingSessionLog.timestamp = now.toISOString();
+      if (durationMinutes !== undefined) {
+        existingSessionLog.durationMinutes = durationMinutes;
+      }
+      if (latitude !== undefined) existingSessionLog.latitude = latitude;
+      if (longitude !== undefined) existingSessionLog.longitude = longitude;
+      
+      if (pageOpened) {
+        existingSessionLog.pageOpened = pageOpened;
+        existingSessionLog.pagesVisited = existingSessionLog.pagesVisited || [];
+        if (!existingSessionLog.pagesVisited.includes(pageOpened)) {
+          existingSessionLog.pagesVisited.push(pageOpened);
+        }
+      }
+
+      if (actionDone) {
+        existingSessionLog.updatesPerformed = existingSessionLog.updatesPerformed || [];
+        if (!existingSessionLog.updatesPerformed.includes(actionDone)) {
+          existingSessionLog.updatesPerformed.push(actionDone);
+        }
+      }
+
+      saveData();
+      return res.json({ success: true, updated: true, logs: user.attendanceLogs, user });
+    }
+  }
+
+  // Prevent logging app_open on same page with similar timestamp to avoid excessive cluttering (fallback if no sessionId)
+  if (type === 'app_open' && !sessionId && user.attendanceLogs.length > 0) {
+    const lastLog = user.attendanceLogs[user.attendanceLogs.length - 1];
+    if (lastLog.type === 'app_open' && lastLog.pageOpened === pageOpened) {
+      const lastTime = new Date(lastLog.timestamp);
+      const diffMinutes = (now.getTime() - lastTime.getTime()) / (1000 * 60);
+      if (diffMinutes < 1) { // Throttle updates within 1 minute
+        return res.json({ success: true, duplicated: true, logs: user.attendanceLogs, user });
+      }
+    }
+  }
+
+  const initialPagesVisited = pageOpened ? [pageOpened] : ['Home Feed Dashboard'];
+  const initialUpdatesPerformed = actionDone ? [actionDone] : [];
+
+  const newLog: any = {
+    timestamp: now.toISOString(),
+    type: type || 'app_open',
+    location: location || 'Gwalior Nagar Nigam Office',
+    device: device || 'GMC Secure Web Portal',
+    pageOpened: pageOpened || 'Home Feed Dashboard',
+    durationMinutes: durationMinutes || Math.floor(Math.random() * 8) + 2,
+    latitude: latitude || 26.2183,
+    longitude: longitude || 78.1828,
+    sessionId: sessionId || `sess_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+    pagesVisited: initialPagesVisited,
+    updatesPerformed: initialUpdatesPerformed
+  };
+
+  if (type === 'manual_checkin') {
+    newLog.status = 'active';
+    newLog.checkInTime = now.toISOString();
+    newLog.checkOutTime = null;
+    newLog.durationMinutes = 0;
+  }
+
+  user.attendanceLogs.push(newLog);
+  saveData();
+  res.json({ success: true, logs: user.attendanceLogs, user });
+});
+
+// Authority Attendance - View Level 1 and Level 2 Reports (for Level 3 and Admins)
+app.get('/api/authorities/attendance-report', (req, res) => {
+  // Filters to find only level_1 and level_2 authorities
+  const targets = db.users.filter(u => 
+    (u.role === 'authority' || u.role === 'admin') && 
+    (u.accessLevel === 'level_1' || u.accessLevel === 'level_2')
+  );
+
+  const report = targets.map(u => {
+    const logs = u.attendanceLogs || [];
+    const manualCheckins = logs.filter(l => l.type === 'manual_checkin');
+    const appOpens = logs.filter(l => l.type === 'app_open');
+    const lastActive = logs.length > 0 ? logs[logs.length - 1].timestamp : null;
+
+    return {
+      uid: u.uid,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar,
+      accessLevel: u.accessLevel,
+      role: u.role,
+      verificationStatus: u.verificationStatus,
+      totalLogsCount: logs.length,
+      manualCheckinsCount: manualCheckins.length,
+      appOpensCount: appOpens.length,
+      lastActive,
+      logs
+    };
+  });
+
+  res.json(report);
 });
 
 // 7. Get global & ward-level impact statistics
@@ -1030,23 +1369,30 @@ app.get('/api/leaderboard', (req, res) => {
 // -------------------------------------------------------------
 // VITE CLIENT ROUTING & PRODUCTION STATIC DELIVERY
 // -------------------------------------------------------------
-if (process.env.NODE_ENV === 'production') {
-  // Serve production build files
-  app.use(express.static(path.join(__dirname, 'dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+async function startServer() {
+  if (process.env.NODE_ENV === 'production') {
+    // Serve production build files
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  } else {
+    // In development, integrate Vite middleware dynamically
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa'
+    });
+    app.use(vite.middlewares);
+  }
+
+  // Global server listen
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`My Gwalior City App server running successfully on http://0.0.0.0:${port}`);
   });
-} else {
-  // In development, integrate Vite middleware dynamically
-  const { createServer: createViteServer } = await import('vite');
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa'
-  });
-  app.use(vite.middlewares);
 }
 
-// Global server listen
-app.listen(port, '0.0.0.0', () => {
-  console.log(`My Gwalior City App server running successfully on http://0.0.0.0:${port}`);
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
 });
